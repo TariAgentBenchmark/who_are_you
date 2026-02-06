@@ -6,6 +6,8 @@ PY_VER="3.12"
 CUDA_VER="12.4"
 ENGINE=""
 
+EXPORT_YML=0
+
 usage() {
   cat <<'EOF'
 Usage: scripts/create_env.sh [options]
@@ -15,6 +17,7 @@ Options:
   --python VER        Python version (default: 3.12)
   --cuda VER          CUDA toolkit version (default: 12.4)
   --engine ENGINE     conda|micromamba (auto-detect if omitted)
+  --export-yml        Export environment.yml
   -h, --help          Show this help
 EOF
 }
@@ -25,6 +28,7 @@ while [[ $# -gt 0 ]]; do
     --python) PY_VER="$2"; shift 2 ;;
     --cuda) CUDA_VER="$2"; shift 2 ;;
     --engine) ENGINE="$2"; shift 2 ;;
+    --export-yml) EXPORT_YML=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1"; usage; exit 1 ;;
   esac
@@ -59,9 +63,12 @@ else
   micromamba install -n "$ENV_NAME" -c conda-forge uv -y
 fi
 
-echo "Exporting environment.yml"
-if ! "$ENGINE" env export -n "$ENV_NAME" --no-builds > environment.yml; then
-  "$ENGINE" env export -n "$ENV_NAME" > environment.yml
+if [[ "$EXPORT_YML" -eq 1 ]]; then
+  echo "Exporting environment.yml"
+  if ! "$ENGINE" env export -n "$ENV_NAME" --no-builds > environment.yml; then
+    "$ENGINE" env export -n "$ENV_NAME" > environment.yml
+  fi
+  echo "Done. environment.yml written."
+else
+  echo "Done."
 fi
-
-echo "Done. environment.yml written."
