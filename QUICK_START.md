@@ -14,11 +14,15 @@ If you only have the NVIDIA driver (no `nvcc`), install a CUDA toolkit inside co
 
 ```bash
 # Create conda env
-bash scripts/create_env.sh
+conda env create -f environment.yml -n who-are-you
+# or
+# bash scripts/create_env.sh
+
 # Activate conda env
 conda activate who-are-you
+
 # Install pinned python packages. Don't use the fucking pip.
-uv sync
+uv sync --locked
 ```
 
 Optional: export `environment.yml`
