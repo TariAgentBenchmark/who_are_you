@@ -51,6 +51,11 @@ Verify:
 python check_env.py
 ```
 
+run
+```bash
+uv run --python 3.12 --refresh python main.py --precision_target 0.999 --recall_target 0.995
+```
+
 ## System CUDA Setup (alternative: system CUDA 12.4)
 If you already have a system CUDA toolkit, you can use it instead of conda.
 
