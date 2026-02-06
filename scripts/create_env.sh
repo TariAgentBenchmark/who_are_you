@@ -5,6 +5,7 @@ ENV_NAME="who-are-you"
 PY_VER="3.12"
 CUDA_VER="12.4"
 ENGINE=""
+STRICT_CUDA=1
 
 EXPORT_YML=0
 
@@ -17,6 +18,8 @@ Options:
   --python VER        Python version (default: 3.12)
   --cuda VER          CUDA toolkit version (default: 12.4)
   --engine ENGINE     conda|micromamba (auto-detect if omitted)
+  --strict-cuda       Pin NVVM packages to CUDA version (default)
+  --no-strict-cuda    Allow mixed CUDA packages
   --export-yml        Export environment.yml
   -h, --help          Show this help
 EOF
@@ -28,6 +31,8 @@ while [[ $# -gt 0 ]]; do
     --python) PY_VER="$2"; shift 2 ;;
     --cuda) CUDA_VER="$2"; shift 2 ;;
     --engine) ENGINE="$2"; shift 2 ;;
+    --strict-cuda) STRICT_CUDA=1; shift ;;
+    --no-strict-cuda) STRICT_CUDA=0; shift ;;
     --export-yml) EXPORT_YML=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1"; usage; exit 1 ;;
@@ -51,10 +56,24 @@ if [[ "$ENGINE" != "conda" && "$ENGINE" != "micromamba" ]]; then
 fi
 
 echo "Using engine: $ENGINE"
-echo "Creating env: $ENV_NAME (python=$PY_VER, cuda-toolkit=$CUDA_VER)"
+if [[ "$STRICT_CUDA" -eq 1 ]]; then
+  echo "Creating env: $ENV_NAME (python=$PY_VER, cuda=$CUDA_VER, strict)"
+else
+  echo "Creating env: $ENV_NAME (python=$PY_VER, cuda=$CUDA_VER)"
+fi
+
+CUDA_PKGS=("cuda-toolkit=$CUDA_VER")
+if [[ "$STRICT_CUDA" -eq 1 ]]; then
+  CUDA_PKGS+=(
+    "cuda-version=$CUDA_VER"
+    "cuda-nvvm-impl=$CUDA_VER"
+    "cuda-nvvm-tools=$CUDA_VER"
+    "cuda-nvvm-dev_linux-64=$CUDA_VER"
+  )
+fi
 
 "$ENGINE" create -y -n "$ENV_NAME" -c nvidia -c conda-forge \
-  "python=$PY_VER" "cuda-toolkit=$CUDA_VER" pip
+  "python=$PY_VER" "${CUDA_PKGS[@]}"
 
 echo "Installing uv"
 if [[ "$ENGINE" == "conda" ]]; then
