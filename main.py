@@ -32,12 +32,22 @@ from tqdm import tqdm
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent / "core"))
-try:
-    from core import core_main
-    CORE_AVAILABLE = True
-except Exception as exc:
-    CORE_AVAILABLE = False
-    CORE_IMPORT_ERROR = exc
+
+CORE_IMPORT_ERROR = None
+core_main = None
+
+
+def load_core(logger: logging.Logger):
+    global CORE_IMPORT_ERROR
+    try:
+        from core import core_main as _core_main
+        return _core_main
+    except Exception as exc:
+        CORE_IMPORT_ERROR = exc
+        msg = [f"core import failed: {exc}"]
+        msg.append("This often means NVVM mismatch. See CUDA env setup tips.")
+        logger.error("\n".join(msg))
+        raise
 
 
 WINDOW_SIZE = 565
@@ -637,14 +647,17 @@ def main():
     parser.add_argument("--threshold_steps", type=int, default=DEFAULT_CONFIG["evaluation"]["threshold_steps"])
     args = parser.parse_args()
 
-    if not CORE_AVAILABLE:
+    try:
+        global core_main
+        core_main = load_core(logger)
+    except Exception:
         msg = [f"core import failed: {CORE_IMPORT_ERROR}"]
         if "No module named" in str(CORE_IMPORT_ERROR):
             msg.append("Install missing dependencies (e.g., scikit-learn) or re-run with `uv run --refresh`.")
         msg.extend([
             "If this is a CUDA/numba/llvmlite mismatch:",
             "Recommended: Python 3.12 + numba 0.59 + CUDA toolkit 11.8+.",
-            "If you are on Python 3.13, switch to 3.12 for numba compatibility.",
+            "Make sure NUMBA_CUDA_NVVM points to CUDA 12.x (e.g., /usr/local/cuda-12.4/nvvm/lib64/libnvvm.so).",
         ])
         raise RuntimeError("\n".join(msg))
 
