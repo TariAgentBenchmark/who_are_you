@@ -2,6 +2,13 @@
 由于平台抽成高，如果您对这次服务满意，后续有任何需求，可以直接加我wx：15637899910，直接对接防止中间商赚差价
 由于平台有规则，您加或者不加都请不要在微信讨论这个事情。感谢！！！！
 
+Dataset placement:
+```
+datasets/
+  TIMIT/
+  generated_TIMIT/
+```
+
 ## Conda CUDA Toolkit (recommended for env isolation)
 If you only have the NVIDIA driver (no `nvcc`), install a CUDA toolkit inside conda.
 
