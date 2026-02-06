@@ -638,12 +638,14 @@ def main():
     args = parser.parse_args()
 
     if not CORE_AVAILABLE:
-        msg = [
-            f"core import failed: {CORE_IMPORT_ERROR}",
-            "This is usually a CUDA/numba/llvmlite mismatch.",
+        msg = [f"core import failed: {CORE_IMPORT_ERROR}"]
+        if "No module named" in str(CORE_IMPORT_ERROR):
+            msg.append("Install missing dependencies (e.g., scikit-learn) or re-run with `uv run --refresh`.")
+        msg.extend([
+            "If this is a CUDA/numba/llvmlite mismatch:",
             "Recommended: Python 3.12 + numba 0.59 + CUDA toolkit 11.8+.",
             "If you are on Python 3.13, switch to 3.12 for numba compatibility.",
-        ]
+        ])
         raise RuntimeError("\n".join(msg))
 
     config = DEFAULT_CONFIG.copy()
