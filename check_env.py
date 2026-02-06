@@ -78,6 +78,10 @@ def check_cuda_toolkit() -> None:
     else:
         print("WARNING: No CUDA toolkits found under /usr/local")
 
+    if "not found" in nvcc_out.lower():
+        print("INFO: If you only have the NVIDIA driver, install CUDA toolkit via:")
+        print("      bash scripts/create_env.sh")
+
 
 def check_numba_stack() -> None:
     try:
@@ -118,6 +122,11 @@ def main() -> None:
     print("  export CUDA_HOME=/usr/local/cuda-12.4")
     print("  export NUMBA_CUDA_NVVM=$CUDA_HOME/nvvm/lib64/libnvvm.so")
     print("  export NUMBA_CUDA_LIBDEVICE=$CUDA_HOME/nvvm/libdevice")
+    print("\nFor conda-based CUDA toolkit setup:")
+    print("  bash scripts/create_env.sh")
+    print("  export NUMBA_CUDA_NVVM=$CONDA_PREFIX/nvvm/lib64/libnvvm.so")
+    print("  export NUMBA_CUDA_LIBDEVICE=$CONDA_PREFIX/nvvm/libdevice")
+    print("  export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$CONDA_PREFIX/nvvm/lib64:$LD_LIBRARY_PATH")
 
 
 if __name__ == "__main__":
