@@ -6,7 +6,12 @@
 If you only have the NVIDIA driver (no `nvcc`), install a CUDA toolkit inside conda.
 
 ```bash
+# Create conda env
 bash scripts/create_env.sh
+# Activate conda env
+conda activate who-are-you
+# Install pinned python packages. Don't use the fucking pip.
+uv sync
 ```
 
 Optional: export `environment.yml`
