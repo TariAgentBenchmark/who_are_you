@@ -654,6 +654,10 @@ def main():
     parser.add_argument("--threshold_steps", type=int, default=DEFAULT_CONFIG["evaluation"]["threshold_steps"])
     args = parser.parse_args()
 
+    output_dir = Path(args.output_dir)
+    logger = setup_logger(output_dir)
+    logger.info("Starting reproduction pipeline")
+
     try:
         global core_main
         core_main = load_core(logger)
@@ -677,9 +681,6 @@ def main():
     config["evaluation"]["recall_target"] = args.recall_target
     config["evaluation"]["threshold_steps"] = args.threshold_steps
 
-    output_dir = Path(args.output_dir)
-    logger = setup_logger(output_dir)
-    logger.info("Starting reproduction pipeline")
     logger.info(json.dumps(config, indent=2))
 
     real_dir = Path(args.real_dir)
