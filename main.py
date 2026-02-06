@@ -81,19 +81,53 @@ DEFAULT_CONFIG = {
 }
 
 
+class _ConsoleFilter(logging.Filter):
+    def __init__(self, allow_prefixes: Optional[List[str]] = None):
+        super().__init__()
+        self.allow_prefixes = allow_prefixes or []
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if record.levelno >= logging.WARNING:
+            return True
+        return any(msg.startswith(prefix) for prefix in self.allow_prefixes)
+
+
 def setup_logger(output_dir: Path) -> logging.Logger:
     output_dir.mkdir(parents=True, exist_ok=True)
     log_file = output_dir / "run.log"
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=[],
         force=True,
     )
-    return logging.getLogger("who_are_you")
+
+    logger = logging.getLogger("who_are_you")
+
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    console_handler.addFilter(
+        _ConsoleFilter(
+            allow_prefixes=[
+                "Starting reproduction pipeline",
+                "[real] audio files",
+                "[fake] audio files",
+                "Done",
+                "RESULTS",
+            ]
+        )
+    )
+    logger.addHandler(console_handler)
+    logger.setLevel(logging.INFO)
+    return logger
 
 
 def iter_audio_files(root: Path) -> Iterable[Path]:
@@ -293,7 +327,7 @@ def extract_features_for_file(
                 })
 
     if skipped_short > 0:
-        logger.info(f"Skipped {skipped_short} short bigrams in {audio_path}")
+        logger.debug(f"Skipped {skipped_short} short bigrams in {audio_path}")
 
     if not rows:
         return None
@@ -731,7 +765,7 @@ def main():
         plot_artifacts(output_dir, exploded_df, ratios_eval, ideal_df)
 
     logger.info("Done")
-    logger.info(json.dumps(results, indent=2))
+    logger.info("RESULTS\n" + json.dumps(results, indent=2))
 
 
 if __name__ == "__main__":
