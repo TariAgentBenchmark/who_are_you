@@ -391,6 +391,8 @@ def split_by_speaker(df: pd.DataFrame, eval_speakers: int, seed: int) -> Tuple[p
 
 
 def scan_threshold(y_true: np.ndarray, scores: np.ndarray, precision_target: float, recall_target: float, steps: int) -> float:
+    if scores.size == 0:
+        return 0.0
     best_threshold = None
     best_f1 = -1.0
     thresholds = np.linspace(scores.min(), scores.max(), steps)
@@ -505,11 +507,16 @@ def evaluate_non_optimized(
     config: Dict,
 ) -> Dict:
     ratios = compute_violation_ratio(exploded_df, ranges_df)
+    if ratios.empty:
+        return {"error": "no overlapping ranges for evaluation"}, ratios
     ratios_train, ratios_eval = split_by_speaker(
         ratios,
         eval_speakers=config["evaluation"]["eval_speakers"],
         seed=config["evaluation"]["random_seed"],
     )
+    if ratios_train.empty:
+        ratios_train = ratios
+        ratios_eval = ratios
     y_true = ratios_train["is_fake"].values.astype(int)
     scores = ratios_train["violation_ratio"].values
     threshold = scan_threshold(
