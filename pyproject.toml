@@ -7,7 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "datasets>=2.14.0",
     "pandas>=2.0.0",
-    "numpy>=1.24.0",
+    "numpy>=1.24.0,<2.1",
     "tqdm>=4.65.0",
     "huggingface-hub>=0.19.0",
     "audiofile>=0.12.0",
