@@ -5,7 +5,6 @@ ENV_NAME="who-are-you"
 PY_VER="3.12"
 CUDA_VER="12.4"
 ENGINE=""
-SKIP_PIP=0
 
 usage() {
   cat <<'EOF'
@@ -16,7 +15,6 @@ Options:
   --python VER        Python version (default: 3.12)
   --cuda VER          CUDA toolkit version (default: 12.4)
   --engine ENGINE     conda|micromamba (auto-detect if omitted)
-  --skip-pip          Skip "pip install -e ."
   -h, --help          Show this help
 EOF
 }
@@ -27,7 +25,6 @@ while [[ $# -gt 0 ]]; do
     --python) PY_VER="$2"; shift 2 ;;
     --cuda) CUDA_VER="$2"; shift 2 ;;
     --engine) ENGINE="$2"; shift 2 ;;
-    --skip-pip) SKIP_PIP=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1"; usage; exit 1 ;;
   esac
@@ -55,9 +52,11 @@ echo "Creating env: $ENV_NAME (python=$PY_VER, cuda-toolkit=$CUDA_VER)"
 "$ENGINE" create -y -n "$ENV_NAME" -c nvidia -c conda-forge \
   "python=$PY_VER" "cuda-toolkit=$CUDA_VER" pip
 
-if [[ "$SKIP_PIP" -eq 0 ]]; then
-  echo "Installing project dependencies (pip -e .)"
-  "$ENGINE" run -n "$ENV_NAME" python -m pip install -e .
+echo "Installing uv"
+if [[ "$ENGINE" == "conda" ]]; then
+  conda install -n "$ENV_NAME" -c conda-forge uv -y
+else
+  micromamba install -n "$ENV_NAME" -c conda-forge uv -y
 fi
 
 echo "Exporting environment.yml"
