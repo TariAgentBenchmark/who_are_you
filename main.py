@@ -539,6 +539,8 @@ def evaluate_ideal_features(
     ideal_df: pd.DataFrame,
     config: Dict,
 ) -> Dict:
+    if ideal_df is None or ideal_df.empty or "bigram_label" not in ideal_df.columns:
+        return {"error": "no ideal features found"}, None
     merged = exploded_df.merge(
         ideal_df,
         on=["bigram_label", "window_index", "tube_idx"],
