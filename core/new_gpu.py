@@ -148,8 +148,7 @@ def grad_calc(r_series, omega_series, targets, fft_curve, sub_matrix, FS, MAX_IT
     #get thread and block information
     w_id = cuda.threadIdx.x
     b_id = cuda.blockIdx.x
-    #BLOCKS_PER_FRAME = cuda.gridDim
-    BLOCKS_PER_FRAME = 8
+    BLOCKS_PER_FRAME = cuda.gridDim.x
 
     #Each thread will be responsible for ceil(r_series / 8) r's except for the last block
     r_parallel = int64(ceil(r_series.size / BLOCKS_PER_FRAME))
@@ -194,4 +193,3 @@ def grad_calc(r_series, omega_series, targets, fft_curve, sub_matrix, FS, MAX_IT
 
         #make sure that all threads have adjusted the r_series before beginning next time through loop
         cuda.syncthreads()
-

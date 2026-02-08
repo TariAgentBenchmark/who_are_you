@@ -68,6 +68,7 @@ DEFAULT_CONFIG = {
         "overlap": OVERLAP,
         "min_windows": 1,
         "expected_sample_rate": 16000,
+        "gd_max_iteration": 1500,
     },
     "evaluation": {
         "eval_speakers": 250,
@@ -308,7 +309,13 @@ def extract_features_for_file(
             for win_idx, (ws, we) in enumerate(windows):
                 if ws < 0 or we > len(audio):
                     continue
-                core_meta = {"oper": "ext", "ph_type": "vt", "FS": sr, "sex": sex}
+                core_meta = {
+                    "oper": "ext",
+                    "ph_type": "vt",
+                    "FS": sr,
+                    "sex": sex,
+                    "gd_max_iteration": config["processing"]["gd_max_iteration"],
+                }
                 try:
                     acoustic_data, _ = core_main(audio[ws:we], bigram_label, core_meta)
                 except Exception:
@@ -755,6 +762,7 @@ def main():
     parser.add_argument("--precision_target", type=float, default=DEFAULT_CONFIG["evaluation"]["precision_target"])
     parser.add_argument("--recall_target", type=float, default=DEFAULT_CONFIG["evaluation"]["recall_target"])
     parser.add_argument("--threshold_steps", type=int, default=DEFAULT_CONFIG["evaluation"]["threshold_steps"])
+    parser.add_argument("--gd_max_iteration", type=int, default=DEFAULT_CONFIG["processing"]["gd_max_iteration"])
     parser.add_argument("--force_reextract", action="store_true")
     args = parser.parse_args()
 
@@ -785,6 +793,7 @@ def main():
     config["evaluation"]["precision_target"] = args.precision_target
     config["evaluation"]["recall_target"] = args.recall_target
     config["evaluation"]["threshold_steps"] = args.threshold_steps
+    config["processing"]["gd_max_iteration"] = args.gd_max_iteration
 
     logger.info(json.dumps(config, indent=2))
 
