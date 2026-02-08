@@ -463,6 +463,26 @@ def split_by_speaker(df: pd.DataFrame, eval_speakers: int, seed: int) -> Tuple[p
     return df_train, df_eval
 
 
+def split_ideal_operation3(
+    df: pd.DataFrame,
+    pool_speakers: int,
+    eval_speakers: int,
+    seed: int,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    speakers = sorted(df["speaker_id"].unique().tolist())
+    random.seed(seed)
+    if pool_speakers is not None and pool_speakers > 0 and len(speakers) > pool_speakers:
+        speakers = random.sample(speakers, pool_speakers)
+    eval_count = min(eval_speakers, len(speakers))
+    eval_set = set(random.sample(speakers, eval_count))
+    pool_set = set(speakers)
+    train_set = pool_set - eval_set
+    df_pool = df[df["speaker_id"].isin(pool_set)]
+    df_train = df_pool[df_pool["speaker_id"].isin(train_set)]
+    df_eval = df_pool[df_pool["speaker_id"].isin(eval_set)]
+    return df_train, df_eval
+
+
 def scan_threshold(y_true: np.ndarray, scores: np.ndarray, precision_target: float, recall_target: float, steps: int) -> float:
     if scores.size == 0:
         return 0.0
@@ -503,47 +523,59 @@ def compute_violation_ratio(exploded_df: pd.DataFrame, ranges_df: pd.DataFrame) 
 
 def build_ideal_features(
     exploded_df: pd.DataFrame,
+    ranges_df: pd.DataFrame,
     precision_target: float,
     recall_target: float,
     steps: int,
 ) -> pd.DataFrame:
+    # Match extract_threshold.py operation3:
+    # 1) Use ranges from organic (true) training speakers
+    # 2) Sweep threshold only within [min, max]
+    # 3) Use one-sided rule: value > threshold
+    keys = ["bigram_label", "window_index", "tube_idx"]
+    merged = exploded_df.merge(
+        ranges_df[keys + ["min", "max"]],
+        on=keys,
+        how="inner",
+    )
+    if merged.empty:
+        return pd.DataFrame()
+
     rows = []
-    grouped = exploded_df.groupby(["bigram_label", "window_index", "tube_idx"])
+    grouped = merged.groupby(keys)
     for key, group in tqdm(grouped, desc="ideal feature search"):
-        real_vals = group[group["is_fake"] == False]["value"].values
-        fake_vals = group[group["is_fake"] == True]["value"].values
-        if len(real_vals) < 5 or len(fake_vals) < 5:
+        y_true = group["is_fake"].values.astype(int)
+        positives = int(np.sum(y_true == 1))
+        negatives = int(np.sum(y_true == 0))
+        if positives == 0 or negatives == 0:
             continue
 
-        values = np.concatenate([real_vals, fake_vals])
-        thresholds = np.linspace(values.min(), values.max(), steps)
+        lo = float(group["min"].iloc[0])
+        hi = float(group["max"].iloc[0])
+        thresholds = np.linspace(lo, hi, steps)
         best = None
+        values = group["value"].values
 
-        for direction in ("gt", "lt"):
-            for t in thresholds:
-                if direction == "gt":
-                    y_pred = group["value"].values > t
-                else:
-                    y_pred = group["value"].values < t
-                y_true = group["is_fake"].values.astype(int)
-                tp = np.sum((y_true == 1) & (y_pred == 1))
-                fp = np.sum((y_true == 0) & (y_pred == 1))
-                fn = np.sum((y_true == 1) & (y_pred == 0))
-                precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-                recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-                if precision >= precision_target and recall >= recall_target:
-                    best = {
-                        "bigram_label": key[0],
-                        "window_index": key[1],
-                        "tube_idx": key[2],
-                        "threshold": float(t),
-                        "direction": direction,
-                        "precision": float(precision),
-                        "recall": float(recall),
-                        "support": int(len(group)),
-                    }
-                    break
-            if best is not None:
+        for t in thresholds:
+            y_pred = values > t
+            tp = np.sum((y_true == 1) & (y_pred == 1))
+            fp = np.sum((y_true == 0) & (y_pred == 1))
+            fn = np.sum((y_true == 1) & (y_pred == 0))
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            if precision >= precision_target and recall >= recall_target:
+                best = {
+                    "bigram_label": key[0],
+                    "window_index": key[1],
+                    "tube_idx": key[2],
+                    "min": lo,
+                    "max": hi,
+                    "threshold": float(t),
+                    "direction": "gt",
+                    "precision": float(precision),
+                    "recall": float(recall),
+                    "support": int(len(group)),
+                }
                 break
 
         if best is not None:
@@ -636,13 +668,8 @@ def evaluate_ideal_features(
     votes["pred_label"] = (votes["pred"] >= 0.5).astype(int)
     votes["true_label"] = votes["is_fake"].astype(int)
 
-    votes_train, votes_eval = split_by_speaker(
-        votes,
-        eval_speakers=config["evaluation"]["eval_speakers"],
-        seed=config["evaluation"]["random_seed"],
-    )
-    metrics = evaluate_from_votes(votes_eval[["true_label", "pred_label"]])
-    return metrics, votes_eval
+    metrics = evaluate_from_votes(votes[["true_label", "pred_label"]])
+    return metrics, votes
 
 
 def plot_artifacts(
@@ -724,6 +751,7 @@ def main():
     parser.add_argument("--output_dir", default=DEFAULT_CONFIG["output"]["output_dir"])
     parser.add_argument("--max_files", type=int, default=None)
     parser.add_argument("--eval_speakers", type=int, default=DEFAULT_CONFIG["evaluation"]["eval_speakers"])
+    parser.add_argument("--ideal_pool_speakers", type=int, default=300)
     parser.add_argument("--precision_target", type=float, default=DEFAULT_CONFIG["evaluation"]["precision_target"])
     parser.add_argument("--recall_target", type=float, default=DEFAULT_CONFIG["evaluation"]["recall_target"])
     parser.add_argument("--threshold_steps", type=int, default=DEFAULT_CONFIG["evaluation"]["threshold_steps"])
@@ -753,6 +781,7 @@ def main():
     config["data"]["fake_dir"] = args.fake_dir
     config["data"]["max_files"] = args.max_files
     config["evaluation"]["eval_speakers"] = args.eval_speakers
+    config["evaluation"]["ideal_pool_speakers"] = args.ideal_pool_speakers
     config["evaluation"]["precision_target"] = args.precision_target
     config["evaluation"]["recall_target"] = args.recall_target
     config["evaluation"]["threshold_steps"] = args.threshold_steps
@@ -782,19 +811,30 @@ def main():
     exploded_df = explode_features(features_df)
     exploded_df.to_csv(output_dir / "features_exploded.csv", index=False)
 
-    ranges_df = compute_organic_ranges(exploded_df)
+    exploded_train, exploded_eval = split_ideal_operation3(
+        exploded_df,
+        pool_speakers=config["evaluation"]["ideal_pool_speakers"],
+        eval_speakers=config["evaluation"]["eval_speakers"],
+        seed=config["evaluation"]["random_seed"],
+    )
+    if exploded_train.empty or exploded_eval.empty:
+        exploded_train = exploded_df
+        exploded_eval = exploded_df
+
+    ranges_df = compute_organic_ranges(exploded_train)
     ranges_df.to_csv(output_dir / "organic_ranges.csv", index=False)
 
     nonopt_metrics, ratios_eval = evaluate_non_optimized(exploded_df, ranges_df, config)
 
     ideal_df = build_ideal_features(
-        exploded_df,
+        exploded_train,
+        ranges_df,
         precision_target=config["evaluation"]["precision_target"],
         recall_target=config["evaluation"]["recall_target"],
         steps=config["evaluation"]["threshold_steps"],
     )
     ideal_df.to_pickle(output_dir / "ideal_features.pkl")
-    ideal_metrics, ideal_votes = evaluate_ideal_features(exploded_df, ideal_df, config)
+    ideal_metrics, ideal_votes = evaluate_ideal_features(exploded_eval, ideal_df, config)
 
     results = {
         "non_optimized": nonopt_metrics,
@@ -802,6 +842,8 @@ def main():
         "counts": {
             "features_rows": int(len(features_df)),
             "exploded_rows": int(len(exploded_df)),
+            "ideal_train_rows": int(len(exploded_train)),
+            "ideal_eval_rows": int(len(exploded_eval)),
             "ideal_feature_count": int(len(ideal_df)),
         },
     }
