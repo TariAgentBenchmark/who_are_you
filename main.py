@@ -52,6 +52,8 @@ def load_core(logger: logging.Logger):
 
 WINDOW_SIZE = 565
 OVERLAP = 115
+VT_MIN_VALUE = 1e-4
+VT_MAX_VALUE = 1e4
 
 SILENCE_TOKENS = {"h#", "pau", "epi", "sp", "spn", "sil"}
 
@@ -315,6 +317,9 @@ def extract_features_for_file(
 
                 if not acoustic_data or "cross_sect_est" not in acoustic_data:
                     continue
+                vt_features = _sanitize_vt_features(acoustic_data["cross_sect_est"])
+                if vt_features is None:
+                    continue
 
                 rows.append({
                     "file_id": str(rel_path),
@@ -323,7 +328,7 @@ def extract_features_for_file(
                     "is_fake": is_fake,
                     "bigram_label": bigram_label,
                     "window_index": win_idx,
-                    "vt_features": acoustic_data["cross_sect_est"],
+                    "vt_features": vt_features,
                 })
 
     if skipped_short > 0:
@@ -352,6 +357,16 @@ def _deserialize_vt_features(value: str) -> np.ndarray:
     return np.asarray(json.loads(value), dtype=float)
 
 
+def _sanitize_vt_features(value) -> Optional[np.ndarray]:
+    arr = _deserialize_vt_features(value)
+    if arr.ndim != 1 or arr.size == 0:
+        return None
+    if not np.all(np.isfinite(arr)):
+        return None
+    arr = np.clip(arr, VT_MIN_VALUE, VT_MAX_VALUE)
+    return arr.astype(float)
+
+
 def extract_features_dataset(
     root_dir: Path,
     split: str,
@@ -359,6 +374,7 @@ def extract_features_dataset(
     output_dir: Path,
     config: Dict,
     logger: logging.Logger,
+    force_reextract: bool = False,
 ) -> List[Path]:
     cached = []
     files = list(iter_audio_files(root_dir))
@@ -370,7 +386,7 @@ def extract_features_dataset(
         rel_path = audio_path.relative_to(root_dir)
         cache_path = feature_cache_path(output_dir, split, rel_path)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        if cache_path.exists():
+        if cache_path.exists() and not force_reextract:
             cached.append(cache_path)
             continue
 
@@ -387,6 +403,8 @@ def extract_features_dataset(
             to_save["vt_features"] = to_save["vt_features"].apply(_serialize_vt_features)
             to_save.to_csv(cache_path, index=False)
             cached.append(cache_path)
+        elif force_reextract and cache_path.exists():
+            cache_path.unlink()
 
     return cached
 
@@ -397,7 +415,8 @@ def collect_cached_features(output_dir: Path) -> pd.DataFrame:
     for p in tqdm(feature_files, desc="load features"):
         df = pd.read_csv(p)
         if "vt_features" in df.columns:
-            df["vt_features"] = df["vt_features"].apply(_deserialize_vt_features)
+            df["vt_features"] = df["vt_features"].apply(_sanitize_vt_features)
+            df = df[df["vt_features"].notna()]
         dfs.append(df)
     if not dfs:
         return pd.DataFrame()
@@ -407,7 +426,9 @@ def collect_cached_features(output_dir: Path) -> pd.DataFrame:
 def explode_features(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for _, row in tqdm(df.iterrows(), total=len(df), desc="explode features"):
-        vt = row["vt_features"]
+        vt = _sanitize_vt_features(row["vt_features"])
+        if vt is None:
+            continue
         for tube_idx, value in enumerate(vt):
             rows.append({
                 "file_id": row["file_id"],
@@ -706,6 +727,7 @@ def main():
     parser.add_argument("--precision_target", type=float, default=DEFAULT_CONFIG["evaluation"]["precision_target"])
     parser.add_argument("--recall_target", type=float, default=DEFAULT_CONFIG["evaluation"]["recall_target"])
     parser.add_argument("--threshold_steps", type=int, default=DEFAULT_CONFIG["evaluation"]["threshold_steps"])
+    parser.add_argument("--force_reextract", action="store_true")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -742,8 +764,12 @@ def main():
     if not real_dir.exists() or not fake_dir.exists():
         raise RuntimeError("Dataset dirs not found")
 
-    extract_features_dataset(real_dir, "real", False, output_dir, config, logger)
-    extract_features_dataset(fake_dir, "fake", True, output_dir, config, logger)
+    extract_features_dataset(
+        real_dir, "real", False, output_dir, config, logger, force_reextract=args.force_reextract
+    )
+    extract_features_dataset(
+        fake_dir, "fake", True, output_dir, config, logger, force_reextract=args.force_reextract
+    )
 
     features_df = collect_cached_features(output_dir)
     if features_df.empty:

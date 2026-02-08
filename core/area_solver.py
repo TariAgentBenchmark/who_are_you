@@ -9,29 +9,53 @@ coefficient series and vice versa.
 #pylint: disable=bad-whitespace,invalid-name
 #pylint: disable=trailing-whitespace
 
+import numpy as np
 
-def areaSolver(r_N, A_0):
+
+R_LIMIT = 0.99
+DENOM_EPS = 1e-4
+MIN_AREA = 1e-4
+MAX_AREA = 1e4
+
+def areaSolver(r_N, A_0, r_limit=R_LIMIT, denom_eps=DENOM_EPS, min_area=MIN_AREA, max_area=MAX_AREA):
     """
     This function converts the series of reflection coefficients into the 
     estimated cross sectional area for a given tube series based on a given 
     starting cross sectional area. 
     """
-    pos = len(r_N)-1
+    A_0 = float(np.clip(A_0, min_area, max_area))
     A_list = []
     for pos in range(0, len(r_N)):
-        r_k = r_N[pos]
-        next_A = (A_0 * (r_k + 1)) / (1 - r_k)
+        r_k = float(r_N[pos])
+        if not np.isfinite(r_k):
+            A_list.append(A_0)
+            continue
+        r_k = float(np.clip(r_k, -r_limit, r_limit))
+        denom = 1.0 - r_k
+        if abs(denom) < denom_eps:
+            denom = denom_eps if denom >= 0 else -denom_eps
+        next_A = (A_0 * (r_k + 1.0)) / denom
+        if not np.isfinite(next_A):
+            next_A = A_0
+        next_A = float(np.clip(next_A, min_area, max_area))
         A_list.append(next_A)
         A_0 = next_A
     return A_list
 
-def reflectionSolver(a_n):
+def reflectionSolver(a_n, denom_eps=DENOM_EPS, r_limit=R_LIMIT):
     """
     This fucntion converts a series of cross sectional area into the corresponding
     reflection coefficient series. 
     """
     r_series = []
     for i in range(0, len(a_n) - 1):
-        r_series.append((a_n[i+1] - a_n[i]) / (a_n[i+1] + a_n[i]))
+        top = a_n[i+1] - a_n[i]
+        bottom = a_n[i+1] + a_n[i]
+        if abs(bottom) < denom_eps:
+            bottom = denom_eps if bottom >= 0 else -denom_eps
+        r_val = top / bottom
+        if not np.isfinite(r_val):
+            r_val = 0.0
+        r_series.append(float(np.clip(r_val, -r_limit, r_limit)))
 
     return r_series
