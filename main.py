@@ -11,9 +11,9 @@ builds organic ranges, selects ideal feature sets, evaluates, and emits plots.
 
 Outputs (under --output_dir, default: ./outputs):
   - run.log
-  - features/real/**/*.pkl, features/fake/**/*.pkl
-  - features_agg.pkl, features_exploded.pkl
-  - organic_ranges.pkl, ideal_features.pkl
+  - features/real/**/*.csv, features/fake/**/*.csv
+  - features_agg.csv, features_exploded.csv
+  - organic_ranges.csv, ideal_features.pkl
   - results.json
   - plots/*.png
 """
@@ -336,7 +336,20 @@ def extract_features_for_file(
 
 
 def feature_cache_path(output_dir: Path, split: str, rel_path: Path) -> Path:
-    return output_dir / "features" / split / rel_path.with_suffix(".pkl")
+    return output_dir / "features" / split / rel_path.with_suffix(".csv")
+
+
+def _serialize_vt_features(value) -> str:
+    arr = np.asarray(value, dtype=float).tolist()
+    return json.dumps(arr)
+
+
+def _deserialize_vt_features(value: str) -> np.ndarray:
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return np.asarray(value, dtype=float)
+    if pd.isna(value):
+        return np.asarray([], dtype=float)
+    return np.asarray(json.loads(value), dtype=float)
 
 
 def extract_features_dataset(
@@ -370,17 +383,22 @@ def extract_features_dataset(
             logger=logger,
         )
         if df is not None:
-            df.to_pickle(cache_path)
+            to_save = df.copy()
+            to_save["vt_features"] = to_save["vt_features"].apply(_serialize_vt_features)
+            to_save.to_csv(cache_path, index=False)
             cached.append(cache_path)
 
     return cached
 
 
 def collect_cached_features(output_dir: Path) -> pd.DataFrame:
-    feature_files = list((output_dir / "features").rglob("*.pkl"))
+    feature_files = list((output_dir / "features").rglob("*.csv"))
     dfs = []
     for p in tqdm(feature_files, desc="load features"):
-        dfs.append(pd.read_pickle(p))
+        df = pd.read_csv(p)
+        if "vt_features" in df.columns:
+            df["vt_features"] = df["vt_features"].apply(_deserialize_vt_features)
+        dfs.append(df)
     if not dfs:
         return pd.DataFrame()
     return pd.concat(dfs, ignore_index=True)
@@ -730,13 +748,16 @@ def main():
     features_df = collect_cached_features(output_dir)
     if features_df.empty:
         raise RuntimeError("No features extracted")
-    features_df.to_pickle(output_dir / "features_agg.pkl")
+    features_df_to_save = features_df.copy()
+    if "vt_features" in features_df_to_save.columns:
+        features_df_to_save["vt_features"] = features_df_to_save["vt_features"].apply(_serialize_vt_features)
+    features_df_to_save.to_csv(output_dir / "features_agg.csv", index=False)
 
     exploded_df = explode_features(features_df)
-    exploded_df.to_pickle(output_dir / "features_exploded.pkl")
+    exploded_df.to_csv(output_dir / "features_exploded.csv", index=False)
 
     ranges_df = compute_organic_ranges(exploded_df)
-    ranges_df.to_pickle(output_dir / "organic_ranges.pkl")
+    ranges_df.to_csv(output_dir / "organic_ranges.csv", index=False)
 
     nonopt_metrics, ratios_eval = evaluate_non_optimized(exploded_df, ranges_df, config)
 
