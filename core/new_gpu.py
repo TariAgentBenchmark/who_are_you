@@ -20,7 +20,8 @@ from cmath import sqrt, exp
 R_STEP = 0.01
 omega_len = 320
 max_r_layers = 6
-gamma = 1e-6
+gamma = 2e-7
+R_BOUND = 0.95
 
 @cuda.jit('UniTuple(c16, 2)(f8, i8, i8)', device=True)
 def z_value_calc(omega, N, FS):
@@ -175,13 +176,12 @@ def grad_calc(r_series, omega_series, targets, fft_curve, sub_matrix, FS, MAX_IT
             new_val = r_series[w_id] + gamma * gradients[w_id]
             
             #enforce boundary conditions of r values
-            if abs(new_val) <= 1.0:
-                r_series[w_id] = new_val
+            if new_val < -R_BOUND:
+                r_series[w_id] = -R_BOUND
+            elif new_val > R_BOUND:
+                r_series[w_id] = R_BOUND
             else:
-                if new_val < 0:
-                    r_series[w_id] = -0.99
-                else:
-                    r_series[w_id] = 0.99
+                r_series[w_id] = new_val
 
         #set areas to zeros to see if that fixes issue
         #if b_id < max_r_layers:
@@ -190,6 +190,68 @@ def grad_calc(r_series, omega_series, targets, fft_curve, sub_matrix, FS, MAX_IT
         ##set sub_matrix to all zeros
         #for r_id in range(0, r_parallel):
         #    sub_matrix[r_start + r_id][w_id] = 0
+
+        #make sure that all threads have adjusted the r_series before beginning next time through loop
+        cuda.syncthreads()
+
+
+@cuda.jit('void(f8[:, :], f8[:], f8[:, :], f8[:, :], f8[:, :, :], i8, i8, f8[:, :])')
+def grad_calc_batch(r_series_batch, omega_series, targets_batch, fft_curve_batch, sub_matrix_batch, FS, MAX_ITER, gradients_batch):
+    """Batch version of grad_calc.
+    - grid.x: r-parallel blocks per sample
+    - grid.y: sample index in the batch
+    """
+    #set up shared memory for the high and low calculations
+    high_area = cuda.shared.array(shape=(max_r_layers, omega_len), dtype=float64)
+    low_area = cuda.shared.array(shape=(max_r_layers, omega_len), dtype=float64)
+
+    #get thread and block information
+    w_id = cuda.threadIdx.x
+    b_id = cuda.blockIdx.x
+    sample_id = cuda.blockIdx.y
+    blocks_per_frame = cuda.gridDim.x
+
+    r_size = r_series_batch.shape[1]
+    if r_size == 0:
+        return
+    r_parallel = int64(ceil(r_size / blocks_per_frame))
+    r_start = int64(b_id * r_parallel)
+
+    #views for this sample
+    r_series = r_series_batch[sample_id]
+    targets = targets_batch[sample_id]
+    fft_curve = fft_curve_batch[sample_id]
+    gradients = gradients_batch[sample_id]
+    sub_matrix = sub_matrix_batch[sample_id]
+
+    #calculate z value for each thread
+    z_neg_n_2, z_neg = z_value_calc(omega_series[w_id], r_series.size, FS)
+
+    #gradient descent looping section
+    for _ in range(0, MAX_ITER):
+        #calculate Transfer Function output
+        fft_curve[w_id] = calc_transfer(
+            high_area, r_start, r_parallel, r_series, z_neg_n_2, z_neg, targets, w_id, False
+        )
+        _ = calc_transfer(
+            low_area, r_start, r_parallel, r_series, z_neg_n_2, z_neg, targets, w_id, True
+        )
+
+        #find difference between high and low area
+        cuda.syncthreads()
+        calc_gradients(gradients, sub_matrix, high_area, low_area, r_start, r_parallel, r_series.size)
+
+        #gradient found, step for next iteration
+        if b_id == 0 and w_id < gradients.size:
+            new_val = r_series[w_id] + gamma * gradients[w_id]
+
+            #enforce boundary conditions of r values
+            if new_val < -R_BOUND:
+                r_series[w_id] = -R_BOUND
+            elif new_val > R_BOUND:
+                r_series[w_id] = R_BOUND
+            else:
+                r_series[w_id] = new_val
 
         #make sure that all threads have adjusted the r_series before beginning next time through loop
         cuda.syncthreads()

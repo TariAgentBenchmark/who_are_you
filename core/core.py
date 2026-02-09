@@ -170,7 +170,7 @@ def core_main(audio, label, meta_data={}):
     
             #call gpu GD
             #r, _, _ = gd.descent(fft_data, freqs, R_SERIES, max_iteration=1500)
-            max_iter = int(meta_data.get('gd_max_iteration', 1500))
+            max_iter = int(meta_data.get('gd_max_iteration', 1000))
             r = gd.descent(fft_data, freqs, FS, R_SERIES, max_iteration=max_iter)
             cc_area = area_solver.areaSolver(r, A_0)        #convert to area instead of 
                                                             #reflection coeff
@@ -214,3 +214,67 @@ def core_main(audio, label, meta_data={}):
         #construct output
 
     return acoustic_data_out, audio_out
+
+
+def core_main_batch(audio_batch, label_batch, meta_data={}):
+    """Batch version of core_main for extraction mode.
+    Falls back to per-sample `core_main` when assumptions are not met.
+    """
+    if len(audio_batch) == 0:
+        return [], []
+
+    operation = meta_data.get('oper', 'ext')
+    if operation != 'ext' or meta_data.get('ph_type', 'vt') != 'vt':
+        acoustic_list = []
+        audio_out_list = []
+        for audio, label in zip(audio_batch, label_batch):
+            acoustic_data, audio_out = core_main(audio, label, meta_data)
+            acoustic_list.append(acoustic_data)
+            audio_out_list.append(audio_out)
+        return acoustic_list, audio_out_list
+
+    FS = meta_data.get('FS', None)
+    sex = meta_data.get('sex', 'm')
+    number_div = 5120
+
+    fft_batch = []
+    freq_ref = None
+    for audio in audio_batch:
+        fft_data, freqs = calc_fft(audio, output_size=number_div, fs=FS, clean=True, cutoff=5000)
+        if freq_ref is None:
+            freq_ref = freqs
+        elif len(freq_ref) != len(freqs):
+            # Shape mismatch fallback.
+            acoustic_list = []
+            audio_out_list = []
+            for audio_single, label_single in zip(audio_batch, label_batch):
+                acoustic_data, audio_out = core_main(audio_single, label_single, meta_data)
+                acoustic_list.append(acoustic_data)
+                audio_out_list.append(audio_out)
+            return acoustic_list, audio_out_list
+        fft_batch.append(fft_data)
+
+    N, A_0 = sex_assumptions(sex)
+    R_SERIES = np.zeros((N,), dtype=np.float64)
+    max_iter = int(meta_data.get('gd_max_iteration', 1000))
+    gd_batch_size = int(meta_data.get('gd_batch_size', 8))
+
+    r_batch = gd.descent_batch(
+        np.asarray(fft_batch, dtype=np.float64),
+        np.asarray(freq_ref, dtype=np.float64),
+        FS,
+        R_SERIES,
+        max_iteration=max_iter,
+        batch_size=gd_batch_size,
+    )
+
+    acoustic_list = []
+    for idx, r in enumerate(r_batch):
+        cc_area = area_solver.areaSolver(r, A_0)
+        acoustic_data_out = {
+            'cross_sect_est': cc_area,
+            'label': label_batch[idx],
+        }
+        acoustic_list.append(acoustic_data_out)
+
+    return acoustic_list, [None] * len(acoustic_list)

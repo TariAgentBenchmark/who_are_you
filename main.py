@@ -35,12 +35,19 @@ sys.path.insert(0, str(Path(__file__).parent / "core"))
 
 CORE_IMPORT_ERROR = None
 core_main = None
+core_main_batch = None
 
 
 def load_core(logger: logging.Logger):
     global CORE_IMPORT_ERROR
+    global core_main_batch
     try:
         from core import core_main as _core_main
+        try:
+            from core import core_main_batch as _core_main_batch
+            core_main_batch = _core_main_batch
+        except Exception:
+            core_main_batch = None
         return _core_main
     except Exception as exc:
         CORE_IMPORT_ERROR = exc
@@ -54,6 +61,7 @@ WINDOW_SIZE = 565
 OVERLAP = 115
 VT_MIN_VALUE = 1e-4
 VT_MAX_VALUE = 1e4
+VT_EDGE_RATIO_MAX = 0.4
 
 SILENCE_TOKENS = {"h#", "pau", "epi", "sp", "spn", "sil"}
 
@@ -68,7 +76,8 @@ DEFAULT_CONFIG = {
         "overlap": OVERLAP,
         "min_windows": 1,
         "expected_sample_rate": 16000,
-        "gd_max_iteration": 1500,
+        "gd_max_iteration": 1000,
+        "gd_batch_size": 8,
     },
     "evaluation": {
         "eval_speakers": 250,
@@ -287,7 +296,9 @@ def extract_features_for_file(
 
     rows = []
     skipped_short = 0
+    skipped_unstable = 0
 
+    candidates = []
     for block in word_blocks:
         phs = block["phonemes"]
         for i in range(len(phs) - 1):
@@ -309,37 +320,63 @@ def extract_features_for_file(
             for win_idx, (ws, we) in enumerate(windows):
                 if ws < 0 or we > len(audio):
                     continue
-                core_meta = {
-                    "oper": "ext",
-                    "ph_type": "vt",
-                    "FS": sr,
-                    "sex": sex,
-                    "gd_max_iteration": config["processing"]["gd_max_iteration"],
-                }
+                candidates.append((win_idx, ws, we, bigram_label))
+
+    batch_size = max(1, int(config["processing"].get("gd_batch_size", 1)))
+    core_meta = {
+        "oper": "ext",
+        "ph_type": "vt",
+        "FS": sr,
+        "sex": sex,
+        "gd_max_iteration": config["processing"]["gd_max_iteration"],
+        "gd_batch_size": batch_size,
+    }
+
+    for start in range(0, len(candidates), batch_size):
+        batch = candidates[start:start + batch_size]
+        acoustic_batch = None
+
+        if core_main_batch is not None and len(batch) > 1:
+            try:
+                audio_batch = [audio[ws:we] for _, ws, we, _ in batch]
+                label_batch = [bigram_label for _, _, _, bigram_label in batch]
+                acoustic_batch, _ = core_main_batch(audio_batch, label_batch, core_meta)
+            except Exception:
+                logger.exception(f"Core batch failed: {audio_path} batch[{start}:{start + len(batch)}]")
+                acoustic_batch = None
+
+        if acoustic_batch is None or len(acoustic_batch) != len(batch):
+            acoustic_batch = []
+            for win_idx, ws, we, bigram_label in batch:
                 try:
                     acoustic_data, _ = core_main(audio[ws:we], bigram_label, core_meta)
                 except Exception:
                     logger.exception(f"Core failed: {audio_path} win[{ws}:{we}]")
-                    continue
+                    acoustic_data = None
+                acoustic_batch.append(acoustic_data)
 
-                if not acoustic_data or "cross_sect_est" not in acoustic_data:
-                    continue
-                vt_features = _sanitize_vt_features(acoustic_data["cross_sect_est"])
-                if vt_features is None:
-                    continue
+        for (win_idx, _ws, _we, bigram_label), acoustic_data in zip(batch, acoustic_batch):
+            if not acoustic_data or "cross_sect_est" not in acoustic_data:
+                continue
+            vt_features = _sanitize_vt_features(acoustic_data["cross_sect_est"])
+            if vt_features is None:
+                skipped_unstable += 1
+                continue
 
-                rows.append({
-                    "file_id": str(rel_path),
-                    "speaker_id": speaker_id,
-                    "sample_id": sample_id,
-                    "is_fake": is_fake,
-                    "bigram_label": bigram_label,
-                    "window_index": win_idx,
-                    "vt_features": vt_features,
-                })
+            rows.append({
+                "file_id": str(rel_path),
+                "speaker_id": speaker_id,
+                "sample_id": sample_id,
+                "is_fake": is_fake,
+                "bigram_label": bigram_label,
+                "window_index": win_idx,
+                "vt_features": vt_features,
+            })
 
     if skipped_short > 0:
         logger.debug(f"Skipped {skipped_short} short bigrams in {audio_path}")
+    if skipped_unstable > 0:
+        logger.debug(f"Skipped {skipped_unstable} unstable windows in {audio_path}")
 
     if not rows:
         return None
@@ -370,8 +407,11 @@ def _sanitize_vt_features(value) -> Optional[np.ndarray]:
         return None
     if not np.all(np.isfinite(arr)):
         return None
-    arr = np.clip(arr, VT_MIN_VALUE, VT_MAX_VALUE)
-    return arr.astype(float)
+    arr = np.clip(arr, VT_MIN_VALUE, VT_MAX_VALUE).astype(float)
+    edge_ratio = float(np.mean((arr <= VT_MIN_VALUE) | (arr >= VT_MAX_VALUE)))
+    if edge_ratio > VT_EDGE_RATIO_MAX:
+        return None
+    return arr
 
 
 def extract_features_dataset(
@@ -763,6 +803,7 @@ def main():
     parser.add_argument("--recall_target", type=float, default=DEFAULT_CONFIG["evaluation"]["recall_target"])
     parser.add_argument("--threshold_steps", type=int, default=DEFAULT_CONFIG["evaluation"]["threshold_steps"])
     parser.add_argument("--gd_max_iteration", type=int, default=DEFAULT_CONFIG["processing"]["gd_max_iteration"])
+    parser.add_argument("--gd_batch_size", type=int, default=DEFAULT_CONFIG["processing"]["gd_batch_size"])
     parser.add_argument("--force_reextract", action="store_true")
     args = parser.parse_args()
 
@@ -794,6 +835,7 @@ def main():
     config["evaluation"]["recall_target"] = args.recall_target
     config["evaluation"]["threshold_steps"] = args.threshold_steps
     config["processing"]["gd_max_iteration"] = args.gd_max_iteration
+    config["processing"]["gd_batch_size"] = args.gd_batch_size
 
     logger.info(json.dumps(config, indent=2))
 

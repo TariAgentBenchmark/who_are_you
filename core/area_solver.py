@@ -12,8 +12,8 @@ coefficient series and vice versa.
 import numpy as np
 
 
-R_LIMIT = 0.99
-DENOM_EPS = 1e-4
+R_LIMIT = 0.95
+DENOM_EPS = 1e-3
 MIN_AREA = 1e-4
 MAX_AREA = 1e4
 

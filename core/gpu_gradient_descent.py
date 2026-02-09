@@ -22,7 +22,7 @@ import time
 #Pylint flags
 #pylint: disable=trailing-whitespace,consider-using-enumerate
 
-def _df_gpu(truth, freq, FS, r_series_guess, max_iterations):
+def _df_gpu_batch(truth_batch, freq, FS, r_series_guess, max_iterations):
     """Function to calculate the slope of the area function evaluated at 
     a specific coeff value. This slope is calculated using an iterative method
     to prevent needing any knowledge about the underlying equations defining the 
@@ -33,26 +33,36 @@ def _df_gpu(truth, freq, FS, r_series_guess, max_iterations):
     8575        320         8
     """
     #fixed values
+    truth_batch = np.asarray(truth_batch, dtype=np.float64)
+    if truth_batch.ndim == 1:
+        truth_batch = truth_batch[None, :]
+
+    batch_size = int(truth_batch.shape[0])
     r_size = int(len(r_series_guess))
     omega_size = int(len(freq))
     if r_size == 0 or omega_size == 0:
-        return np.asarray(r_series_guess, dtype=np.float64), np.asarray([], dtype=np.float64)
+        empty_r = np.zeros((batch_size, r_size), dtype=np.float64)
+        empty_fft = np.zeros((batch_size, omega_size), dtype=np.float64)
+        return empty_r, empty_fft
 
     threads_per_block = omega_size
     # Keep one r-value per block for better occupancy while avoiding idle blocks.
     blocks_per_grid = max(1, min(r_size, 32))
+    while math.ceil(r_size / blocks_per_grid) > 6:
+        blocks_per_grid += 1
 
     #set up on the device memory for read only memory segments
-    r_vals = cuda.to_device(np.asarray(r_series_guess, dtype=np.float64))
+    r_host = np.repeat(np.asarray(r_series_guess, dtype=np.float64)[None, :], batch_size, axis=0)
+    r_vals = cuda.to_device(r_host)
     omega_vals = cuda.to_device(np.asarray(freq, dtype=np.float64))
-    targets = cuda.to_device(np.asarray(truth, dtype=np.float64))
-    fft_curve = cuda.device_array(shape=(omega_size,), dtype=np.float64)
-    grad = cuda.device_array(shape=(r_size,), dtype=np.float64)
-    sub_matrix = cuda.device_array(shape=(r_size, omega_size), dtype=np.float64)
+    targets = cuda.to_device(truth_batch)
+    fft_curve = cuda.device_array(shape=(batch_size, omega_size), dtype=np.float64)
+    grad = cuda.device_array(shape=(batch_size, r_size), dtype=np.float64)
+    sub_matrix = cuda.device_array(shape=(batch_size, r_size, omega_size), dtype=np.float64)
 
     #call gpu kernel: output --> slope, area_curve
     #print("\n\n\n" + str(type(gpu.grad_calc)) + "\n\n\n")
-    gpu.grad_calc[blocks_per_grid, threads_per_block](
+    gpu.grad_calc_batch[(blocks_per_grid, batch_size), threads_per_block](
         r_vals, omega_vals, targets, fft_curve, sub_matrix, FS, max_iterations, grad
     )
     cuda.synchronize()
@@ -67,7 +77,9 @@ def descent(truth, freq, FS, guess, max_iteration=1500):
     """Main function to be called for performing the gradient descent technique. """
     #single call to gpu per descent operation (low I/O time)
     #curr_grad, curve_area, r_series_found = _df_gpu(truth, freq, guess, max_iteration)
-    r_series_found, curve_area = _df_gpu(truth, freq, FS, guess, max_iteration)
+    r_batch, curve_batch = _df_gpu_batch(truth, freq, FS, guess, max_iteration)
+    r_series_found = r_batch[0]
+    curve_area = curve_batch[0]
 
     #error function
     #rms = math.sqrt(mean_squared_error(truth, curve_area))
@@ -86,3 +98,24 @@ def descent(truth, freq, FS, guess, max_iteration=1500):
 
     #return list(map(lambda x: round(x, 5), r_series_found)), rms, curve_area
     return list(map(lambda x: round(x, 5), r_series_found))
+
+
+def descent_batch(truth_batch, freq, FS, guess, max_iteration=1500, batch_size=8):
+    """Batch gradient descent for multiple windows.
+    Returns a list of r-series, one per window.
+    """
+    truth_batch = np.asarray(truth_batch, dtype=np.float64)
+    if truth_batch.ndim == 1:
+        truth_batch = truth_batch[None, :]
+    if truth_batch.size == 0:
+        return []
+
+    results = []
+    batch_size = max(1, int(batch_size))
+    for start in range(0, truth_batch.shape[0], batch_size):
+        stop = min(start + batch_size, truth_batch.shape[0])
+        r_found, _ = _df_gpu_batch(truth_batch[start:stop], freq, FS, guess, max_iteration)
+        for row in r_found:
+            results.append(list(map(lambda x: round(x, 5), row)))
+
+    return results
