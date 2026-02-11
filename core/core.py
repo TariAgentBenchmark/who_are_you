@@ -170,7 +170,7 @@ def core_main(audio, label, meta_data={}):
     
             #call gpu GD
             #r, _, _ = gd.descent(fft_data, freqs, R_SERIES, max_iteration=1500)
-            max_iter = int(meta_data.get('gd_max_iteration', 1000))
+            max_iter = int(meta_data.get('gd_max_iteration', 1500))
             r = gd.descent(fft_data, freqs, FS, R_SERIES, max_iteration=max_iter)
             cc_area = area_solver.areaSolver(r, A_0)        #convert to area instead of 
                                                             #reflection coeff
@@ -256,8 +256,8 @@ def core_main_batch(audio_batch, label_batch, meta_data={}):
 
     N, A_0 = sex_assumptions(sex)
     R_SERIES = np.zeros((N,), dtype=np.float64)
-    max_iter = int(meta_data.get('gd_max_iteration', 1000))
-    gd_batch_size = int(meta_data.get('gd_batch_size', 8))
+    max_iter = int(meta_data.get('gd_max_iteration', 1500))
+    gd_batch_size = int(meta_data.get('gd_batch_size', 1))
 
     r_batch = gd.descent_batch(
         np.asarray(fft_batch, dtype=np.float64),

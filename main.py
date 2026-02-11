@@ -59,9 +59,6 @@ def load_core(logger: logging.Logger):
 
 WINDOW_SIZE = 565
 OVERLAP = 115
-VT_MIN_VALUE = 1e-4
-VT_MAX_VALUE = 1e4
-VT_EDGE_RATIO_MAX = 0.4
 
 SILENCE_TOKENS = {"h#", "pau", "epi", "sp", "spn", "sil"}
 
@@ -76,8 +73,8 @@ DEFAULT_CONFIG = {
         "overlap": OVERLAP,
         "min_windows": 1,
         "expected_sample_rate": 16000,
-        "gd_max_iteration": 1000,
-        "gd_batch_size": 8,
+        "gd_max_iteration": 1500,
+        "gd_batch_size": 1,
     },
     "evaluation": {
         "eval_speakers": 250,
@@ -407,11 +404,9 @@ def _sanitize_vt_features(value) -> Optional[np.ndarray]:
         return None
     if not np.all(np.isfinite(arr)):
         return None
-    arr = np.clip(arr, VT_MIN_VALUE, VT_MAX_VALUE).astype(float)
-    edge_ratio = float(np.mean((arr <= VT_MIN_VALUE) | (arr >= VT_MAX_VALUE)))
-    if edge_ratio > VT_EDGE_RATIO_MAX:
+    if np.any(arr <= 0):
         return None
-    return arr
+    return arr.astype(float)
 
 
 def extract_features_dataset(

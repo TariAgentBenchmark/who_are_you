@@ -12,32 +12,31 @@ coefficient series and vice versa.
 import numpy as np
 
 
-R_LIMIT = 0.95
-DENOM_EPS = 1e-3
-MIN_AREA = 1e-4
-MAX_AREA = 1e4
+R_LIMIT = 0.99
+DENOM_EPS = 1e-6
 
-def areaSolver(r_N, A_0, r_limit=R_LIMIT, denom_eps=DENOM_EPS, min_area=MIN_AREA, max_area=MAX_AREA):
+def areaSolver(r_N, A_0, r_limit=R_LIMIT, denom_eps=DENOM_EPS):
     """
     This function converts the series of reflection coefficients into the 
     estimated cross sectional area for a given tube series based on a given 
     starting cross sectional area. 
     """
-    A_0 = float(np.clip(A_0, min_area, max_area))
+    if not np.isfinite(A_0) or A_0 <= 0:
+        return []
+    A_0 = float(A_0)
     A_list = []
     for pos in range(0, len(r_N)):
         r_k = float(r_N[pos])
         if not np.isfinite(r_k):
-            A_list.append(A_0)
-            continue
+            return []
         r_k = float(np.clip(r_k, -r_limit, r_limit))
         denom = 1.0 - r_k
         if abs(denom) < denom_eps:
             denom = denom_eps if denom >= 0 else -denom_eps
         next_A = (A_0 * (r_k + 1.0)) / denom
-        if not np.isfinite(next_A):
-            next_A = A_0
-        next_A = float(np.clip(next_A, min_area, max_area))
+        if not np.isfinite(next_A) or next_A <= 0:
+            return []
+        next_A = float(next_A)
         A_list.append(next_A)
         A_0 = next_A
     return A_list

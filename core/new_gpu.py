@@ -20,8 +20,8 @@ from cmath import sqrt, exp
 R_STEP = 0.01
 omega_len = 320
 max_r_layers = 6
-gamma = 2e-7
-R_BOUND = 0.95
+gamma = 1e-6
+R_BOUND = 0.99
 
 @cuda.jit('UniTuple(c16, 2)(f8, i8, i8)', device=True)
 def z_value_calc(omega, N, FS):
