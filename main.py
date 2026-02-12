@@ -511,17 +511,44 @@ def split_ideal_operation3(
     eval_speakers: int,
     seed: int,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    speakers = sorted(df["speaker_id"].unique().tolist())
+    if pool_speakers is None or pool_speakers <= 0:
+        raise RuntimeError(f"--ideal_pool_speakers must be > 0, got {pool_speakers}")
+    if eval_speakers is None or eval_speakers <= 0:
+        raise RuntimeError(f"--eval_speakers must be > 0, got {eval_speakers}")
+    if eval_speakers >= pool_speakers:
+        raise RuntimeError(
+            f"--eval_speakers must be smaller than --ideal_pool_speakers to keep a non-empty train split "
+            f"(got eval={eval_speakers}, pool={pool_speakers})"
+        )
+
+    real_speakers = set(df[df["is_fake"] == False]["speaker_id"].unique().tolist())
+    fake_speakers = set(df[df["is_fake"] == True]["speaker_id"].unique().tolist())
+    speakers = sorted(real_speakers & fake_speakers)
+
+    if len(speakers) < pool_speakers:
+        raise RuntimeError(
+            "Not enough overlapping speakers for requested split: "
+            f"need at least {pool_speakers}, got {len(speakers)} "
+            f"(real={len(real_speakers)}, fake={len(fake_speakers)}, overlap={len(speakers)})"
+        )
+
     random.seed(seed)
-    if pool_speakers is not None and pool_speakers > 0 and len(speakers) > pool_speakers:
+    if len(speakers) > pool_speakers:
         speakers = random.sample(speakers, pool_speakers)
-    eval_count = min(eval_speakers, len(speakers))
-    eval_set = set(random.sample(speakers, eval_count))
+
+    eval_set = set(random.sample(speakers, eval_speakers))
     pool_set = set(speakers)
     train_set = pool_set - eval_set
     df_pool = df[df["speaker_id"].isin(pool_set)]
     df_train = df_pool[df_pool["speaker_id"].isin(train_set)]
     df_eval = df_pool[df_pool["speaker_id"].isin(eval_set)]
+
+    if df_train.empty or df_eval.empty:
+        raise RuntimeError(
+            "Requested split failed: empty train or eval subset after speaker split "
+            f"(train_rows={len(df_train)}, eval_rows={len(df_eval)})"
+        )
+
     return df_train, df_eval
 
 
@@ -863,9 +890,6 @@ def main():
         eval_speakers=config["evaluation"]["eval_speakers"],
         seed=config["evaluation"]["random_seed"],
     )
-    if exploded_train.empty or exploded_eval.empty:
-        exploded_train = exploded_df
-        exploded_eval = exploded_df
 
     ranges_df = compute_organic_ranges(exploded_train)
     ranges_df.to_csv(output_dir / "organic_ranges.csv", index=False)
