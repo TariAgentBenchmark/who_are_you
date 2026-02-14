@@ -48,5 +48,5 @@ hf_who_are_you/
 
 # Speaker to DR mapping (generated during conversion)
 speaker_to_dr.csv
-outputs
+outputs*
 .numba_config.yaml
