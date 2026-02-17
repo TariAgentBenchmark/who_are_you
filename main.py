@@ -75,6 +75,9 @@ DEFAULT_CONFIG = {
         "expected_sample_rate": 16000,
         "gd_max_iteration": 1500,
         "gd_batch_size": 1,
+        "edge_filter_ratio": None,
+        "edge_min": 1e-4,
+        "edge_max": 1e4,
     },
     "evaluation": {
         "eval_speakers": 250,
@@ -407,6 +410,57 @@ def _sanitize_vt_features(value) -> Optional[np.ndarray]:
     if np.any(arr <= 0):
         return None
     return arr.astype(float)
+
+
+def filter_features_by_edge_ratio(
+    df: pd.DataFrame,
+    edge_min: float,
+    edge_max: float,
+    max_edge_ratio: Optional[float],
+) -> Tuple[pd.DataFrame, Dict]:
+    if max_edge_ratio is None:
+        return df, {
+            "enabled": False,
+            "edge_min": float(edge_min),
+            "edge_max": float(edge_max),
+            "max_edge_ratio": None,
+            "total_rows": int(len(df)),
+            "kept_rows": int(len(df)),
+            "dropped_rows": 0,
+        }
+
+    if max_edge_ratio < 0.0 or max_edge_ratio > 1.0:
+        raise RuntimeError(f"--edge_filter_ratio must be in [0, 1], got {max_edge_ratio}")
+
+    edge_ratios = []
+    for value in df["vt_features"].values:
+        vt = _sanitize_vt_features(value)
+        if vt is None or vt.size == 0:
+            edge_ratios.append(1.0)
+            continue
+        ratio = float(np.mean((vt <= edge_min) | (vt >= edge_max)))
+        edge_ratios.append(ratio)
+
+    ratio_arr = np.asarray(edge_ratios, dtype=float)
+    keep_mask = ratio_arr <= max_edge_ratio
+    filtered = df.loc[keep_mask].copy()
+
+    return filtered, {
+        "enabled": True,
+        "edge_min": float(edge_min),
+        "edge_max": float(edge_max),
+        "max_edge_ratio": float(max_edge_ratio),
+        "total_rows": int(len(df)),
+        "kept_rows": int(len(filtered)),
+        "dropped_rows": int(len(df) - len(filtered)),
+        "kept_ratio": float(np.mean(keep_mask)) if len(df) > 0 else 0.0,
+        "edge_ratio_quantiles": {
+            "0.5": float(np.quantile(ratio_arr, 0.5)) if ratio_arr.size else 0.0,
+            "0.9": float(np.quantile(ratio_arr, 0.9)) if ratio_arr.size else 0.0,
+            "0.95": float(np.quantile(ratio_arr, 0.95)) if ratio_arr.size else 0.0,
+            "0.99": float(np.quantile(ratio_arr, 0.99)) if ratio_arr.size else 0.0,
+        },
+    }
 
 
 def extract_features_dataset(
@@ -826,6 +880,9 @@ def main():
     parser.add_argument("--threshold_steps", type=int, default=DEFAULT_CONFIG["evaluation"]["threshold_steps"])
     parser.add_argument("--gd_max_iteration", type=int, default=DEFAULT_CONFIG["processing"]["gd_max_iteration"])
     parser.add_argument("--gd_batch_size", type=int, default=DEFAULT_CONFIG["processing"]["gd_batch_size"])
+    parser.add_argument("--edge_filter_ratio", type=float, default=None, help="Drop windows with edge_ratio above this value (0~1). Default: disabled")
+    parser.add_argument("--edge_min", type=float, default=DEFAULT_CONFIG["processing"]["edge_min"])
+    parser.add_argument("--edge_max", type=float, default=DEFAULT_CONFIG["processing"]["edge_max"])
     parser.add_argument("--force_reextract", action="store_true")
     args = parser.parse_args()
 
@@ -858,6 +915,9 @@ def main():
     config["evaluation"]["threshold_steps"] = args.threshold_steps
     config["processing"]["gd_max_iteration"] = args.gd_max_iteration
     config["processing"]["gd_batch_size"] = args.gd_batch_size
+    config["processing"]["edge_filter_ratio"] = args.edge_filter_ratio
+    config["processing"]["edge_min"] = args.edge_min
+    config["processing"]["edge_max"] = args.edge_max
 
     logger.info(json.dumps(config, indent=2))
 
@@ -876,6 +936,17 @@ def main():
     features_df = collect_cached_features(output_dir)
     if features_df.empty:
         raise RuntimeError("No features extracted")
+
+    features_df, edge_filter_stats = filter_features_by_edge_ratio(
+        features_df,
+        edge_min=config["processing"]["edge_min"],
+        edge_max=config["processing"]["edge_max"],
+        max_edge_ratio=config["processing"]["edge_filter_ratio"],
+    )
+    logger.info(f"Edge filter summary: {json.dumps(edge_filter_stats)}")
+    if features_df.empty:
+        raise RuntimeError("No features left after edge filtering")
+
     features_df_to_save = features_df.copy()
     if "vt_features" in features_df_to_save.columns:
         features_df_to_save["vt_features"] = features_df_to_save["vt_features"].apply(_serialize_vt_features)
@@ -909,6 +980,7 @@ def main():
     results = {
         "non_optimized": nonopt_metrics,
         "ideal_features": ideal_metrics,
+        "edge_filter": edge_filter_stats,
         "counts": {
             "features_rows": int(len(features_df)),
             "exploded_rows": int(len(exploded_df)),
