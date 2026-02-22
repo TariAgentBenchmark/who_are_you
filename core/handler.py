@@ -361,7 +361,9 @@ def bigram_multi(df_audio, data_name=None):
     #        p.map(bigram_analysis_phoneme, inputs)
     #    else:
     #        p.map(bigram_analysis_word, inputs)
-    for tmp in inputs:
+    mode = "phoneme" if labeled_phoneme else "word"
+    print("Extraction mode:", mode)
+    for tmp in tqdm(inputs, desc="Extracting audio files", unit="file"):
         bigram_analysis_phoneme(tmp)
                
 def main():

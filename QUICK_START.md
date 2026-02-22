@@ -67,11 +67,6 @@ Verify:
 python check_env.py
 ```
 
-run
-```bash
-uv run --python 3.12 --refresh python main.py --precision_target 0.999 --recall_target 0.995
-```
-
 ## System CUDA Setup (alternative: system CUDA 12.4)
 If you already have a system CUDA toolkit, you can use it instead of conda.
 
@@ -92,3 +87,44 @@ set -x NUMBA_CUDA_LIBDEVICE $CUDA_HOME/nvvm/libdevice
 set -x LD_LIBRARY_PATH $CUDA_HOME/lib64 $CUDA_HOME/nvvm/lib64 $LD_LIBRARY_PATH
 set -x PATH $CUDA_HOME/bin $PATH
 ```
+
+## Reproduce Paper Results (USENIX Security 2022)
+This section reproduces the pipeline in `sec22-blue.pdf` using:
+- organic audio: `datasets/TIMIT`
+- deepfake audio: `datasets/generated_TIMIT`
+
+### 1) Generate metadata CSVs
+The handler needs per-phoneme timing metadata. Run the script to generate both CSVs:
+
+```bash
+uv run scripts/generate_metadata.py
+```
+
+Outputs:
+- `data/timit_metadata.csv`
+- `data/generated_timit_metadata.csv`
+
+### 2) Start MongoDB
+If you downloaded local binaries into this repo:
+
+```bash
+mkdir -p mongo-data
+./tools/mongodb/bin/mongod --dbpath ./mongo-data --bind_ip 127.0.0.1 --port 27017
+```
+
+### 3) Run end-to-end reproduction
+In another terminal, run:
+
+```bash
+bash scripts/reproduce_paper.sh data/timit_metadata.csv data/generated_timit_metadata.csv
+```
+
+This script will:
+1. Extract features for organic and deepfake audio
+2. Copy collections from `exploration` to `windows`
+3. Run `core/extract_threshold.py`
+
+### 4) Notes
+- Keep `mongod` running during the whole pipeline.
+- Runtime can be long depending on hardware/GPU.
+- If CUDA/numba fails, run `python check_env.py` first and verify `NUMBA_CUDA_NVVM`/`NUMBA_CUDA_LIBDEVICE`.

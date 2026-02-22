@@ -50,3 +50,11 @@ hf_who_are_you/
 speaker_to_dr.csv
 outputs*
 .numba_config.yaml
+
+# Reproduction artifacts
+data/timit_metadata.csv
+data/generated_timit_metadata.csv
+mongo-data/
+tools/mongodb/
+tools/mongodb*.tgz
+tools/mongodb-extract*/

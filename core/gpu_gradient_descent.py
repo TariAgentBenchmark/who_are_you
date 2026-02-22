@@ -36,31 +36,26 @@ def _df_gpu(truth, freq, FS, r_series_guess, max_iterations):
     threads_per_block = 320     #1 thread per omega
     blocks_per_grid = 8         #1 block per r
     
-    stream = cuda.stream()
-    
-    #set up on the device memory for read only memory segments
-    r_vals = cuda.to_device(r_series_guess, stream)
-    omega_vals = cuda.to_device(freq, stream)
-    targets = cuda.to_device(truth, stream)
-    #area curve output for r values
-    #NOTE: For simplisty, this is the high values calculated in my gpu code
-    fft_area = np.array([0.0] * len (freq))
-    fft_curve = cuda.to_device(fft_area, stream)
-    grad_out = np.array([-10.0] * len(r_vals), dtype=np.float64)
-    grad = cuda.to_device(grad_out, stream)
+    #set up device memory once per descent call
+    r_series_guess = np.ascontiguousarray(r_series_guess, dtype=np.float64)
+    freq = np.ascontiguousarray(freq, dtype=np.float64)
+    truth = np.ascontiguousarray(truth, dtype=np.float64)
+
+    r_vals = cuda.to_device(r_series_guess)
+    omega_vals = cuda.to_device(freq)
+    targets = cuda.to_device(truth)
+    fft_curve = cuda.device_array(shape=len(freq), dtype=np.float64)
+    gradients = cuda.device_array(shape=len(r_series_guess), dtype=np.float64)
     sub_matrix = cuda.device_array(shape=(50, 320), dtype=np.float64)
 
     #call gpu kernel: output --> slope, area_curve
     #print("\n\n\n" + str(type(gpu.grad_calc)) + "\n\n\n")
-    gpu.grad_calc[blocks_per_grid, threads_per_block](r_vals, omega_vals, 
-            targets ,fft_curve, sub_matrix, FS, max_iterations, grad_out)
+    gpu.grad_calc[blocks_per_grid, threads_per_block](r_vals, omega_vals,
+            targets, fft_curve, sub_matrix, FS, max_iterations, gradients)
     #r_vals.to_host(stream)
     #fft_curve.to_host(stream)
     r_series_guess = r_vals.copy_to_host()
     fft_area = fft_curve.copy_to_host()
-    
-    #grad.to_host(stream)
-    stream.synchronize()
     #slope = slope.copy_to_host()
     #area_curve = area_curve.copy_to_host()
     #return slope, area_curve, r_found
