@@ -33,6 +33,12 @@ import pdb
 WINDOW_SIZE = 565
 OVERLAP = 115
 
+
+def get_processed_filepaths(data_name):
+    """Read already-processed filepaths from the target collection."""
+    db = DBObj(collection_name=data_name)
+    return set(db.table.distinct('filepath'))
+
 def df_read_fake_csv(path):
     """Function to read in the csv containing all the necessary information for the 
     acoustic core functionalitry. 
@@ -353,6 +359,18 @@ def bigram_multi(df_audio, data_name=None):
     for path in df_audio.filepath.unique():
         inputs.append((df_audio, path, data_name))
 
+    #default behavior: skip filepaths that already exist in target collection
+    force_reprocess = os.environ.get('WRY_FORCE_REPROCESS', '0') == '1'
+    if not force_reprocess:
+        processed = get_processed_filepaths(data_name)
+        before = len(inputs)
+        inputs = [item for item in inputs if item[1] not in processed]
+        skipped = before - len(inputs)
+        print("Already processed filepaths:", len(processed))
+        print("Skipped existing filepaths:", skipped)
+    else:
+        print("WRY_FORCE_REPROCESS=1 -> reprocessing all filepaths")
+
     #multithreading process
     print("Number of files to process: ", len(inputs))
     print("Pool starting...")
@@ -364,7 +382,10 @@ def bigram_multi(df_audio, data_name=None):
     mode = "phoneme" if labeled_phoneme else "word"
     print("Extraction mode:", mode)
     for tmp in tqdm(inputs, desc="Extracting audio files", unit="file"):
-        bigram_analysis_phoneme(tmp)
+        if labeled_phoneme:
+            bigram_analysis_phoneme(tmp)
+        else:
+            bigram_analysis_word(tmp)
                
 def main():
     """Function that allows the handler to act as a terminal interface. 
