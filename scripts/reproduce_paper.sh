@@ -8,21 +8,21 @@ Usage:
 
 Options:
   --clean                  Drop target Mongo collections before run
-  --num-gpus N             Number of GPUs/processes for extraction (default: 1)
+  --num-gpus all|N         Number of GPUs/processes for extraction (default: 1)
   --force-reprocess        Do not skip already-processed filepaths
   -h, --help               Show help
 EOF
 }
 
 CLEAN=0
-NUM_GPUS=1
+NUM_GPUS_ARG=1
 FORCE_REPROCESS=0
 
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean) CLEAN=1; shift ;;
-    --num-gpus) NUM_GPUS="$2"; shift 2 ;;
+    --num-gpus) NUM_GPUS_ARG="$2"; shift 2 ;;
     --force-reprocess) FORCE_REPROCESS=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) POSITIONAL+=("$1"); shift ;;
@@ -37,6 +37,29 @@ fi
 
 TRUE_CSV="$1"
 FAKE_CSV="$2"
+
+if [[ "$NUM_GPUS_ARG" == "all" ]]; then
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    NUM_GPUS="$(nvidia-smi -L | wc -l | tr -d ' ')"
+  else
+    echo "nvidia-smi not found, falling back to 1 GPU process"
+    NUM_GPUS=1
+  fi
+else
+  NUM_GPUS="$NUM_GPUS_ARG"
+fi
+
+if ! [[ "$NUM_GPUS" =~ ^[0-9]+$ ]]; then
+  echo "Invalid --num-gpus value: $NUM_GPUS_ARG"
+  exit 1
+fi
+
+if [[ "$NUM_GPUS" -lt 1 ]]; then
+  echo "--num-gpus must be >= 1"
+  exit 1
+fi
+
+echo "Resolved GPU worker count: $NUM_GPUS"
 
 if [[ "$CLEAN" -eq 1 ]]; then
   echo "[0/5] Cleaning Mongo collections"
