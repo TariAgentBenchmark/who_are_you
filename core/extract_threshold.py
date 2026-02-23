@@ -18,10 +18,11 @@ mark it as an ideal feature for future examples from this model.  """
 #pylint: disable='singleton-comparison'
 import random
 import sys, pickle
+import os
+import json
 from multiprocessing import Pool
 
 import pdb
-import pymongo
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -43,16 +44,31 @@ np.random.seed(123)
 #load data
 def load_data(table_name, collection_name='exploration'):
     """load the data from a specified table for analysis"""
+    backend = os.environ.get('WRY_STORAGE_BACKEND', 'mongo').lower()
+    if backend == 'file':
+        feature_dir = os.environ.get('WRY_FEATURE_DIR', 'outputs/local_features')
+        path = os.path.join(feature_dir, f'{table_name}.jsonl')
+        if not os.path.exists(path):
+            return pd.DataFrame()
+        rows = []
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rows.append(json.loads(line))
+        return pd.DataFrame(rows)
+
+    import pymongo
     myclient = pymongo.MongoClient('mongodb://localhost:27017')
     db = myclient[collection_name]
     table = db[table_name]
-
     return pd.DataFrame(list(table.find()))
 
 def process_df(df):
     """This function will clean up my dataframe and explore out the different
     cross_sect_est into their own rows"""
-    df = df.drop(columns=['_id'])
+    df = df.drop(columns=['_id'], errors='ignore')
 
     #explode data
     df_exp = df.explode('cross_sect_est')

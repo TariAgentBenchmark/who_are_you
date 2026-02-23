@@ -37,7 +37,7 @@ OVERLAP = 115
 def get_processed_filepaths(data_name):
     """Read already-processed filepaths from the target collection."""
     db = DBObj(collection_name=data_name)
-    return set(db.table.distinct('filepath'))
+    return set(db.distinct('filepath'))
 
 def df_read_fake_csv(path):
     """Function to read in the csv containing all the necessary information for the 
