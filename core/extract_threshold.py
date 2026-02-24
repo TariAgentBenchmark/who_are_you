@@ -192,7 +192,7 @@ def calc_non_opt_sentence_threshold(df_ranges, df_data):
 
     #per sentence, calculate the percentage of the time we are outside of 
     #organic ranges
-    df_results = df_analysis.groupby(['filepath', 'dataset']).agg('mean')
+    df_results = df_analysis.groupby(['filepath', 'dataset']).mean(numeric_only=True)
     df_results.reset_index(inplace=True)
 
     #sweep values through df_results to find a threshold that divides 
@@ -264,7 +264,7 @@ def non_opt_test_sentences(df_ranges, df_data, threshold_max, threshold_min,
 
     #per sentence, calculate the percentage of the time we are outside of 
     #organic ranges
-    df_results = df_analysis.groupby(['filepath', 'dataset']).agg('mean')
+    df_results = df_analysis.groupby(['filepath', 'dataset']).mean(numeric_only=True)
     df_results.reset_index(inplace=True)
 
     #mark those that above our detection threshold
