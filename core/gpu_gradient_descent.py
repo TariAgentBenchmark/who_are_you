@@ -46,12 +46,11 @@ def _df_gpu(truth, freq, FS, r_series_guess, max_iterations):
     targets = cuda.to_device(truth)
     fft_curve = cuda.device_array(shape=len(freq), dtype=np.float64)
     gradients = cuda.device_array(shape=len(r_series_guess), dtype=np.float64)
-    sub_matrix = cuda.device_array(shape=(50, 320), dtype=np.float64)
 
     #call gpu kernel: output --> slope, area_curve
     #print("\n\n\n" + str(type(gpu.grad_calc)) + "\n\n\n")
     gpu.grad_calc[blocks_per_grid, threads_per_block](r_vals, omega_vals,
-            targets, fft_curve, sub_matrix, FS, max_iterations, gradients)
+            targets, fft_curve, FS, max_iterations, gradients)
     #r_vals.to_host(stream)
     #fft_curve.to_host(stream)
     r_series_guess = r_vals.copy_to_host()

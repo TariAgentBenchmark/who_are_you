@@ -21,6 +21,8 @@ R_STEP = 0.01
 omega_len = 320
 max_r_layers = 6
 gamma = 1e-6
+R_BOUND = 0.99
+R_ATM = 1.0
 
 @cuda.jit('UniTuple(c16, 2)(f8, i8, i8)', device=True)
 def z_value_calc(omega, N, FS):
@@ -59,43 +61,52 @@ def z_value_calc(omega, N, FS):
 @cuda.jit('f8(f8[:,:], i8, i8, f8[:], c16, c16, f8[:], i8, b1)', device=True)
 def calc_transfer(area, r_start, r_parallel, r_series, z_power, z_val, targets, w_id, upper):
     """Function to calculate the transfer fucntion"""
-    number_final = 1
-    for r_id in range(r_start, r_start + r_parallel):
-        number_final = 1
-        if r_id < r_series.size:            #check edge case
+    number_curve = 1
+    for i in range(0, len(r_series)):
+        number_curve = number_curve * (1 + r_series[i])
+    number_curve = number_curve * z_power
+
+    denom_curve_0 = complex128(1)
+    denom_curve_1 = complex128(-1)
+    for i in range(0, len(r_series)):
+        r_loc = r_series[i]
+        denom_tmp = denom_curve_0 + denom_curve_1 * -r_loc * z_val
+        denom_curve_1 = denom_curve_0 * -r_loc + denom_curve_1 * z_val
+        denom_curve_0 = denom_tmp
+    denom_curve = denom_curve_0 + R_ATM * denom_curve_1
+    curve_val = 20 * log10(abs(number_curve / denom_curve))
+
+    for local_r in range(0, r_parallel):
+        r_id = r_start + local_r
+        if r_id < r_series.size:
+            number_final = 1
             for i in range(0, len(r_series)):
                 if i == r_id:
                     if upper:
-                        number_final = number_final * (1 + r_series[i] + R_STEP) * z_power
+                        number_final = number_final * (1 + r_series[i] + R_STEP)
                     else:
-                        number_final = number_final * (1 + r_series[i] - R_STEP) * z_power
+                        number_final = number_final * (1 + r_series[i] - R_STEP)
                 else:
-                    number_final = number_final * (1 + r_series[i]) * z_power
+                    number_final = number_final * (1 + r_series[i])
+            number_final = number_final * z_power
 
             denom_final_0 = complex128(1)
             denom_final_1 = complex128(-1)
-    
-            #preform the square matrix multiplication for the denominator
             for i in range(0, len(r_series)):
                 if i == r_id:
-                    #this is the index of the r value that we are adjusting on
                     if upper:
                         r_loc = r_series[i] + R_STEP
                     else:
                         r_loc = r_series[i] - R_STEP
                 else:
                     r_loc = r_series[i]
-    
-                #multiple denom_final with the newly constructed r_i matrix
-                denom_tmp = denom_final_0  + denom_final_1 * -r_loc * z_val
+                denom_tmp = denom_final_0 + denom_final_1 * -r_loc * z_val
                 denom_final_1 = denom_final_0 * -r_loc + denom_final_1 * z_val
                 denom_final_0 = denom_tmp
-    
-            #area[r_id][w_id] = abs(float64(targets[w_id]) - 20 * log10(abs(number_final / denom_final_0)))
-            area_tmp = abs(float64(targets[w_id]) - 20 * log10(abs(number_final /denom_final_0)))
-            area[r_id-r_start][w_id] = area_tmp
+            denom_final = denom_final_0 + R_ATM * denom_final_1
+            area[local_r][w_id] = abs(float64(targets[w_id]) - 20 * log10(abs(number_final / denom_final)))
 
-    return 20 * log10(abs(number_final / denom_final_0))
+    return curve_val
 
 @cuda.jit(device=True)
 def sum_simple(values):
@@ -104,35 +115,34 @@ def sum_simple(values):
         summed += v
     return summed
 
-@cuda.jit('void(f8[:], f8[:,:], f8[:, :], f8[:, :], i8, i8, i8)', device=True)
-def calc_gradients(grad, sub_matrix, high, low, r_start, r_parallel, r_size):
+@cuda.jit('void(f8[:], f8[:, :], f8[:, :], i8, i8)', device=True)
+def calc_gradients(grad, high, low, r_start, r_parallel):
     """This function will subtract the 2-d area arrays from one another, sum the rows of this
     subtraction, and then calculate the per r gradient for the pass. 
     -   high: 2D array of area's found from calculating the TF area from truth based off increasing
             an r value.
     -   low: 2D array of area's found from calculating the TF area from truth based off decreasing
             an r value.
-    -   sub_matrix: Pre-set up shared array for the results of the subtraction
     -   r_start: starting r for this block to calculated
     -   r_parallel: number of r values this block has to calculated
     """
     omega_id = cuda.threadIdx.x
-    block = cuda.blockIdx.x
     #threadwise subtraction
     for r_id in range(0, r_parallel):
-        sub_matrix[r_start + r_id][omega_id] = high[r_id][omega_id] - low[r_id][omega_id]
+        high[r_id][omega_id] = high[r_id][omega_id] - low[r_id][omega_id]
+
+    cuda.syncthreads()
 
     #summing each row into a single value
     #threads 0, 1, 2, 3, ..., r_parallel - 1 will be used to sum r_start through r_start + r_parallel
-    if block == 0 and omega_id < r_size:
-        #grad[r_start + omega_id] = sum_reduce(sub_matrix[r_start + omega_id]) / (2 * R_STEP)
-        grad[omega_id] = sum_simple(sub_matrix[omega_id]) / (2 * R_STEP)
+    if omega_id < r_parallel and r_start + omega_id < grad.size:
+        grad[r_start + omega_id] = sum_simple(high[omega_id]) / (2 * R_STEP)
     
 
 #@cuda.jit('void(f8[:], f8[:], f8[:], f8[:], f8[:, :], i8, i8, f8[:])', nopython=True)
 #removing nopython=True, gives error on linux
-@cuda.jit('void(f8[:], f8[:], f8[:], f8[:], f8[:, :], i8, i8, f8[:])')
-def grad_calc(r_series, omega_series, targets, fft_curve, sub_matrix, FS, MAX_ITER, gradients):
+@cuda.jit('void(f8[:], f8[:], f8[:], f8[:], i8, i8, f8[:])')
+def grad_calc(r_series, omega_series, targets, fft_curve, FS, MAX_ITER, gradients):
     """Main kernel for performing the gradient descent process on the gpu
         - r_series: r_coeff for the initial guess
         - omega_series: omega frequencies over which to evaluate the fit
@@ -148,8 +158,7 @@ def grad_calc(r_series, omega_series, targets, fft_curve, sub_matrix, FS, MAX_IT
     #get thread and block information
     w_id = cuda.threadIdx.x
     b_id = cuda.blockIdx.x
-    #BLOCKS_PER_FRAME = cuda.gridDim
-    BLOCKS_PER_FRAME = 8
+    BLOCKS_PER_FRAME = cuda.gridDim.x
 
     #Each thread will be responsible for ceil(r_series / 8) r's except for the last block
     r_parallel = int64(ceil(r_series.size / BLOCKS_PER_FRAME))
@@ -169,29 +178,25 @@ def grad_calc(r_series, omega_series, targets, fft_curve, sub_matrix, FS, MAX_IT
         
         #find difference between high and low area
         cuda.syncthreads()
-        calc_gradients(gradients, sub_matrix, high_area, low_area, r_start, r_parallel, r_series.size)
+        calc_gradients(gradients, high_area, low_area, r_start, r_parallel)
+        cuda.syncthreads()
         
         #gradient found, step for next iteration
-        if b_id == 0 and  w_id < gradients.size:
-            new_val = r_series[w_id] + gamma * gradients[w_id]
+        if w_id < r_parallel and r_start + w_id < gradients.size:
+            r_idx = r_start + w_id
+            new_val = r_series[r_idx] + gamma * gradients[r_idx]
             
             #enforce boundary conditions of r values
-            if abs(new_val) <= 1.0:
-                r_series[w_id] = new_val
+            if new_val < -R_BOUND:
+                r_series[r_idx] = -R_BOUND
+            elif new_val > R_BOUND:
+                r_series[r_idx] = R_BOUND
             else:
-                if new_val < 0:
-                    r_series[w_id] = -0.99
-                else:
-                    r_series[w_id] = 0.99
+                r_series[r_idx] = new_val
 
         #set areas to zeros to see if that fixes issue
         #if b_id < max_r_layers:
         #    high_area[b_id][w_id] = 0.0
         #    low_area[b_id][w_id] = 0.0
-        ##set sub_matrix to all zeros
-        #for r_id in range(0, r_parallel):
-        #    sub_matrix[r_start + r_id][w_id] = 0
-
         #make sure that all threads have adjusted the r_series before beginning next time through loop
         cuda.syncthreads()
-
