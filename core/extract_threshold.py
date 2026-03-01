@@ -237,7 +237,7 @@ def calc_non_opt_sentence_threshold(df_ranges, df_data):
         if recall >= 0.9 and precision >= 0.9:
             #good results
             print("Sentence Threshold: ", threshold)
-            threshold_min = threshold
+            threshold_either = threshold
             break
 
     #we didn't find a suitable value
@@ -561,12 +561,26 @@ def main():
             'df_asv_A10.pkl', 'df_asv_A12.pkl', 'df_asv_A13.pkl',
             'df_asv_A14.pkl', 'df_asv_A15.pkl', 'df_asv_A17.pkl',
             'df_asv_A18.pkl', 'df_asv_A19.pkl']
-    df_asv_bon = pickle.load(open('asv_data_files/df_asv_bon.pkl', 'rb'))
+    asv_dir = 'asv_data_files'
+    asv_bon_path = os.path.join(asv_dir, 'df_asv_bon.pkl')
+    if not os.path.exists(asv_bon_path):
+        print(f"No ASV bonafide file found at {asv_bon_path}; skipping ASV evaluation.")
+        return
+
+    existing_asv_pickles = [name for name in asv_pickles if os.path.exists(os.path.join(asv_dir, name))]
+    missing_asv_pickles = [name for name in asv_pickles if name not in existing_asv_pickles]
+    if missing_asv_pickles:
+        print(f"Missing ASV attack files ({len(missing_asv_pickles)}): {missing_asv_pickles}")
+    if not existing_asv_pickles:
+        print("No ASV attack files found; skipping ASV evaluation.")
+        return
+
+    df_asv_bon = pickle.load(open(asv_bon_path, 'rb'))
     df_asv_bon['dataset'] = 'true'
 
-    for asv_curr in asv_pickles:
+    for asv_curr in existing_asv_pickles:
         #load data file
-        df_asv_curr = pickle.load(open('asv_data_files/' + asv_curr, 'rb'))
+        df_asv_curr = pickle.load(open(os.path.join(asv_dir, asv_curr), 'rb'))
         df_asv_curr['dataset'] = 'fakes'
         
         #combine with df_asv_bon
