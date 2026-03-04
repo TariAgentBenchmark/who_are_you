@@ -195,50 +195,46 @@ def calc_non_opt_sentence_threshold(df_ranges, df_data):
     df_results = df_analysis.groupby(['filepath', 'dataset']).mean(numeric_only=True)
     df_results.reset_index(inplace=True)
 
-    #sweep values through df_results to find a threshold that divides 
-    #fakes and organic will enough for the MAX values
-    space = np.linspace(0.004, 0.2, 100)
+    def _pick_threshold(values, y_true, space, metric_name):
+        best_threshold = None
+        best_f1 = -1.0
+        met_target = False
+        for threshold in space:
+            y_pred = list(values > threshold)
+            precision = sklearn.metrics.precision_score(y_true, y_pred, zero_division=0)
+            recall = sklearn.metrics.recall_score(y_true, y_pred, zero_division=0)
+            f1 = sklearn.metrics.f1_score(y_true, y_pred, zero_division=0)
+            if recall >= 0.9 and precision >= 0.9:
+                print(f"Sentence Threshold ({metric_name}): ", threshold)
+                return threshold, True
+            if f1 > best_f1:
+                best_f1 = f1
+                best_threshold = threshold
+        print(
+            f"No threshold met p>=0.9 & r>=0.9 for {metric_name}; "
+            f"falling back to best-F1 threshold {best_threshold} (F1={best_f1:.4f})"
+        )
+        return best_threshold, met_target
+
     y_true = list(df_results.dataset == 'fakes')
-    for threshold in space:
-        y_pred = list(df_results.breaks_max > threshold)
-        precision = sklearn.metrics.precision_score(y_true, y_pred)
-        recall = sklearn.metrics.recall_score(y_true, y_pred)
-
-        if recall >= 0.9 and precision >= 0.9:
-            #good results
-            print("Sentence Threshold: ", threshold)
-            threshold_max = threshold
-            break
-
-    #sweep values through df_results to find a threshold that divides 
-    #fakes and organic will enough for the MIN values
-    space = np.linspace(0.039, 0.2, 100)
-    y_true = list(df_results.dataset == 'fakes')
-    for threshold in space:
-        y_pred = list(df_results.breaks_min > threshold)
-        precision = sklearn.metrics.precision_score(y_true, y_pred)
-        recall = sklearn.metrics.recall_score(y_true, y_pred)
-
-        if recall >= 0.9 and precision >= 0.9:
-            #good results
-            print("Sentence Threshold: ", threshold)
-            threshold_min = threshold
-            break
-    
-    #sweep values through df_results to find a threshold that divides 
-    #fakes and organic will enough for the MIN values
-    space = np.linspace(0.2, 0, 100)
-    y_true = list(df_results.dataset == 'fakes')
-    for threshold in space:
-        y_pred = list(df_results.breaks_either > threshold)
-        precision = sklearn.metrics.precision_score(y_true, y_pred)
-        recall = sklearn.metrics.recall_score(y_true, y_pred)
-
-        if recall >= 0.9 and precision >= 0.9:
-            #good results
-            print("Sentence Threshold: ", threshold)
-            threshold_either = threshold
-            break
+    threshold_max, _ = _pick_threshold(
+        df_results.breaks_max,
+        y_true,
+        np.linspace(0.004, 0.2, 100),
+        "max",
+    )
+    threshold_min, _ = _pick_threshold(
+        df_results.breaks_min,
+        y_true,
+        np.linspace(0.039, 0.2, 100),
+        "min",
+    )
+    threshold_either, _ = _pick_threshold(
+        df_results.breaks_either,
+        y_true,
+        np.linspace(0.2, 0, 100),
+        "either",
+    )
 
     #we didn't find a suitable value
     return threshold_max, threshold_min, threshold_either
@@ -369,9 +365,11 @@ def main():
     sentence_threshold_max, sentence_threshold_min, sentence_threshold_either =\
             calc_non_opt_sentence_threshold(df_org_ranges, df_test)
 
-    if sentence_threshold_max < 0 or sentence_threshold_min < 0:
-        print('Problems...')
-        pdb.set_trace()
+    if sentence_threshold_max is None or sentence_threshold_min is None or sentence_threshold_either is None:
+        print(
+            "Warning: at least one sentence threshold is unavailable; "
+            "results may be unstable."
+        )
 
     #with threshold, use validation threshold to get preformance of technique
     #TODO: REMOVE TEST
