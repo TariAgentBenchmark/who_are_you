@@ -46,6 +46,9 @@ datasets/generated_TIMIT/
 # Converted Hugging Face dataset (can be regenerated)
 hf_who_are_you/
 
+# Generated detector artifacts and reports
+artifacts/
+
 # Speaker to DR mapping (generated during conversion)
 speaker_to_dr.csv
 outputs

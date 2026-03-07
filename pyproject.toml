@@ -1,7 +1,15 @@
 [project]
 name = "who-are-you"
 version = "0.1.0"
-description = "Add your description here"
+description = "Paper reproduction scaffold for vocal tract based audio deepfake detection"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "torch>=2.2.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
