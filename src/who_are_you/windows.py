@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import torch
+import numpy as np
 
 from who_are_you.bigrams import build_in_word_bigrams
 from who_are_you.corpus import UtteranceRecord, read_waveform
@@ -18,7 +18,7 @@ class WindowedBigram:
     window_index: int
     start_sample: int
     end_sample: int
-    waveform: torch.Tensor
+    waveform: np.ndarray
 
 
 def _window_starts(
@@ -42,11 +42,11 @@ def _window_starts(
 
 
 def _slice_with_padding(
-    waveform: torch.Tensor,
+    waveform: np.ndarray,
     start_sample: int,
     window_size: int,
-) -> torch.Tensor:
-    window = torch.zeros(window_size, dtype=torch.float32)
+) -> np.ndarray:
+    window = np.zeros(window_size, dtype=np.float32)
     src_start = max(0, start_sample)
     src_end = min(len(waveform), start_sample + window_size)
     if src_end > src_start:

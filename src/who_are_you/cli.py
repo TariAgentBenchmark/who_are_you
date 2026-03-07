@@ -9,8 +9,7 @@ from who_are_you.bigrams import PhonemeSpan, build_in_word_bigrams
 from who_are_you.config import ReproductionConfig
 from who_are_you.corpus import discover_speakers
 from who_are_you.detector import DetectorModel, build_detector, evaluate_detector
-from who_are_you.runtime import runtime_status
-from who_are_you.transfer_function import recover_cross_sectional_areas, tube_length_cm
+from who_are_you.numba_backend import recover_cross_sectional_areas, tube_length_cm
 
 
 DEFAULT_ORGANIC_ROOT = Path("datasets/TIMIT")
@@ -28,11 +27,6 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("show-config", help="Print the default reproduction configuration.")
     subparsers.add_parser("demo-transfer", help="Show the tract areas recovered from a constant-diameter tube.")
     subparsers.add_parser("demo-bigrams", help="Show how in-word phoneme bigrams are constructed.")
-    runtime = subparsers.add_parser(
-        "runtime-info",
-        help="Show whether the runtime resolves to torch on CPU, CUDA, or MPS.",
-    )
-    runtime.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
 
     summary = subparsers.add_parser("dataset-summary", help="Summarize the prepared organic and generated corpora.")
     add_dataset_args(summary)
@@ -44,7 +38,6 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = subparsers.add_parser("evaluate", help="Evaluate a saved detector model on held-out speakers.")
     add_dataset_args(evaluate)
     evaluate.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
-    evaluate.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default=None)
     evaluate.add_argument("--mode", choices=("ideal", "range"), default="ideal")
     evaluate.add_argument("--max-sentence-pairs", type=int, default=None)
 
@@ -58,7 +51,6 @@ def add_dataset_args(parser: argparse.ArgumentParser) -> None:
 
 def add_common_build_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
-    parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default=None)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--sample-size", type=int, default=None)
     parser.add_argument("--feature-speakers", type=int, default=None)
@@ -76,22 +68,15 @@ def run_show_config() -> int:
     return 0
 
 
-def run_runtime_info(device: str) -> int:
-    print(json.dumps(runtime_status(device), indent=2, sort_keys=True))
-    return 0
-
-
 def run_demo_transfer() -> int:
     config = ReproductionConfig()
     zero_reflections = [0.0] * (config.num_tract_segments - 1)
     areas = recover_cross_sectional_areas(
         reflection_coefficients=zero_reflections,
         initial_area_cm2=config.initial_glottis_area_cm2,
-        device=config.device,
     )
     payload = {
         "num_segments": config.num_tract_segments,
-        "device": config.device,
         "tube_length_cm": tube_length_cm(
             sample_rate_hz=config.sample_rate_hz,
             speed_of_sound_cm_per_s=config.speed_of_sound_cm_per_s,
@@ -134,8 +119,6 @@ def run_dataset_summary(organic_root: Path, generated_root: Path) -> int:
 
 def run_build_detector(args: argparse.Namespace) -> int:
     config = ReproductionConfig()
-    if args.device is not None:
-        config.device = args.device
     if args.fft_bin_stride is not None:
         config.fft_bin_stride = args.fft_bin_stride
     if args.coordinate_search_step is not None:
@@ -157,7 +140,6 @@ def run_build_detector(args: argparse.Namespace) -> int:
     model.save(args.model_path)
     payload = {
         "model_path": str(args.model_path),
-        "resolved_runtime": runtime_status(config.device),
         "sampled_speakers": len(model.sampled_speakers),
         "feature_speakers": len(model.feature_speakers),
         "evaluation_speakers": len(model.evaluation_speakers),
@@ -170,8 +152,6 @@ def run_build_detector(args: argparse.Namespace) -> int:
 
 def run_evaluate(args: argparse.Namespace) -> int:
     model = DetectorModel.load(args.model_path)
-    if args.device is not None:
-        model.config.device = args.device
     if args.max_sentence_pairs is not None:
         model.config.max_sentence_pairs = args.max_sentence_pairs
     result = evaluate_detector(
@@ -180,7 +160,6 @@ def run_evaluate(args: argparse.Namespace) -> int:
         model=model,
         mode=args.mode,
     )
-    result["resolved_runtime"] = runtime_status(model.config.device)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
@@ -195,8 +174,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_demo_transfer()
     if args.command == "demo-bigrams":
         return run_demo_bigrams()
-    if args.command == "runtime-info":
-        return run_runtime_info(args.device)
     if args.command == "dataset-summary":
         return run_dataset_summary(args.organic_root, args.generated_root)
     if args.command == "build-detector":

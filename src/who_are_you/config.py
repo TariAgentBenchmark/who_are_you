@@ -5,7 +5,6 @@ from dataclasses import asdict, dataclass
 
 @dataclass(slots=True)
 class ReproductionConfig:
-    device: str = "auto"
     sample_rate_hz: int = 16_000
     speed_of_sound_cm_per_s: float = 34_300.0
     num_sampled_speakers: int = 300

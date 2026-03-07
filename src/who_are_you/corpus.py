@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-import torch
+import numpy as np
 
 from who_are_you.bigrams import PhonemeSpan
 
@@ -94,13 +94,13 @@ def _build_phoneme_spans(
     return spans
 
 
-def read_waveform(path: Path) -> torch.Tensor:
+def read_waveform(path: Path) -> np.ndarray:
     with wave.open(str(path), "rb") as wav_file:
         frames = wav_file.readframes(wav_file.getnframes())
-        waveform = torch.frombuffer(bytearray(frames), dtype=torch.int16).clone().to(torch.float32)
+        waveform = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
         channels = wav_file.getnchannels()
         if channels > 1:
-            waveform = waveform.reshape(-1, channels).mean(dim=1)
+            waveform = waveform.reshape(-1, channels).mean(axis=1)
         waveform = waveform / 32768.0
         return waveform
 
