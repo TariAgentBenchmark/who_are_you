@@ -6,6 +6,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from tqdm import tqdm
+
 from who_are_you.config import ReproductionConfig
 from who_are_you.corpus import SpeakerBundle, discover_speakers, load_speaker_utterances
 from who_are_you.metrics import BinaryMetrics
@@ -295,8 +297,15 @@ def build_detector(
     )
 
     observations: list[FeatureObservation] = []
-    for bundle in feature:
-        observations.extend(_observations_for_speaker(bundle, config))
+    feature_progress = tqdm(feature, desc="build speakers", unit="speaker")
+    for bundle in feature_progress:
+        feature_progress.set_postfix_str(bundle.speaker_id)
+        speaker_observations = _observations_for_speaker(bundle, config)
+        observations.extend(speaker_observations)
+        feature_progress.set_postfix_str(
+            f"{bundle.speaker_id} obs={len(speaker_observations)} total={len(observations)}"
+        )
+    feature_progress.close()
 
     organic_ranges = _build_organic_ranges(observations)
     ideal_features = _build_ideal_features(
@@ -398,8 +407,10 @@ def evaluate_detector(
         for bundle in discover_speakers(organic_root=organic_root, generated_root=generated_root)
     }
     tp = fp = tn = fn = 0
-    for speaker_id in model.evaluation_speakers:
+    eval_progress = tqdm(model.evaluation_speakers, desc="eval speakers", unit="speaker")
+    for speaker_id in eval_progress:
         bundle = bundles[speaker_id]
+        eval_progress.set_postfix_str(speaker_id)
         organic_pred, deepfake_pred = _evaluate_bundle(bundle, model, mode=mode)
         if organic_pred:
             fp += 1
@@ -409,6 +420,10 @@ def evaluate_detector(
             tp += 1
         else:
             fn += 1
+        eval_progress.set_postfix_str(
+            f"{speaker_id} org={'df' if organic_pred else 'org'} syn={'df' if deepfake_pred else 'org'}"
+        )
+    eval_progress.close()
 
     metrics = BinaryMetrics(
         true_positive=tp,

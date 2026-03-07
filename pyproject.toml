@@ -5,7 +5,9 @@ description = "Paper reproduction scaffold for vocal tract based audio deepfake 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "numpy>=2.0.0",
     "torch>=2.2.0",
+    "tqdm>=4.66.0",
 ]
 
 [tool.setuptools]
