@@ -157,12 +157,30 @@ def split_speakers(
 
 def _observations_for_speaker(bundle: SpeakerBundle, config: ReproductionConfig) -> list[FeatureObservation]:
     observations: list[FeatureObservation] = []
-    for utterance in load_speaker_utterances(bundle, max_sentence_pairs=config.max_sentence_pairs):
-        for windowed_bigram in extract_windowed_bigrams(
+    utterances = load_speaker_utterances(bundle, max_sentence_pairs=config.max_sentence_pairs)
+    utterance_progress = tqdm(
+        utterances,
+        desc=f"{bundle.speaker_id} utterances",
+        unit="utt",
+        leave=False,
+    )
+    for utterance in utterance_progress:
+        utterance_progress.set_postfix_str(f"{utterance.label}:{utterance.sentence_id}")
+        windowed_bigrams = extract_windowed_bigrams(
             utterance=utterance,
             window_size=config.bigram_window_size,
             overlap=config.bigram_window_overlap,
-        ):
+        )
+        window_progress = tqdm(
+            windowed_bigrams,
+            desc=f"{bundle.speaker_id}:{utterance.sentence_id}",
+            unit="window",
+            leave=False,
+        )
+        for windowed_bigram in window_progress:
+            window_progress.set_postfix_str(
+                f"{utterance.label} {windowed_bigram.bigram}#{windowed_bigram.window_index}"
+            )
             estimate = estimate_vocal_tract(windowed_bigram, config)
             for tract_position, value in enumerate(estimate.tract_areas_cm2):
                 observations.append(
@@ -174,6 +192,8 @@ def _observations_for_speaker(bundle: SpeakerBundle, config: ReproductionConfig)
                         sentence_id=utterance.sentence_id,
                     )
                 )
+        window_progress.close()
+    utterance_progress.close()
     return observations
 
 
@@ -368,12 +388,29 @@ def _evaluate_bundle(
     config = model.config
     speaker_utterances = load_speaker_utterances(bundle, max_sentence_pairs=config.max_sentence_pairs)
     by_label = {"organic": [], "deepfake": []}
-    for utterance in speaker_utterances:
-        for windowed_bigram in extract_windowed_bigrams(
+    utterance_progress = tqdm(
+        speaker_utterances,
+        desc=f"{bundle.speaker_id} utterances",
+        unit="utt",
+        leave=False,
+    )
+    for utterance in utterance_progress:
+        utterance_progress.set_postfix_str(f"{utterance.label}:{utterance.sentence_id}")
+        windowed_bigrams = extract_windowed_bigrams(
             utterance=utterance,
             window_size=config.bigram_window_size,
             overlap=config.bigram_window_overlap,
-        ):
+        )
+        window_progress = tqdm(
+            windowed_bigrams,
+            desc=f"{bundle.speaker_id}:{utterance.sentence_id}",
+            unit="window",
+            leave=False,
+        )
+        for windowed_bigram in window_progress:
+            window_progress.set_postfix_str(
+                f"{utterance.label} {windowed_bigram.bigram}#{windowed_bigram.window_index}"
+            )
             estimate = estimate_vocal_tract(windowed_bigram, config)
             for tract_position, value in enumerate(estimate.tract_areas_cm2):
                 by_label[utterance.label].append(
@@ -385,6 +422,8 @@ def _evaluate_bundle(
                         sentence_id=utterance.sentence_id,
                     )
                 )
+        window_progress.close()
+    utterance_progress.close()
 
     if mode == "range":
         organic_pred, _, _ = _predict_deepfake_from_ranges(by_label["organic"], model.organic_ranges)
