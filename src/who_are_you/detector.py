@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from who_are_you.config import ReproductionConfig
 from who_are_you.corpus import SpeakerBundle, discover_speakers, load_speaker_utterances
+from who_are_you.feature_export import build_feature_row, write_utterance_feature_csv
 from who_are_you.metrics import BinaryMetrics
 from who_are_you.tract_reconstruction import estimate_vocal_tract
 from who_are_you.windows import extract_windowed_bigrams
@@ -155,7 +156,11 @@ def split_speakers(
     return sampled, feature, evaluation
 
 
-def _observations_for_speaker(bundle: SpeakerBundle, config: ReproductionConfig) -> list[FeatureObservation]:
+def _observations_for_speaker(
+    bundle: SpeakerBundle,
+    config: ReproductionConfig,
+    feature_output_dir: Path | None = None,
+) -> list[FeatureObservation]:
     observations: list[FeatureObservation] = []
     utterances = load_speaker_utterances(bundle, max_sentence_pairs=config.max_sentence_pairs)
     utterance_progress = tqdm(
@@ -171,6 +176,7 @@ def _observations_for_speaker(bundle: SpeakerBundle, config: ReproductionConfig)
             window_size=config.bigram_window_size,
             overlap=config.bigram_window_overlap,
         )
+        csv_rows: list[dict[str, str | int | float]] = []
         window_progress = tqdm(
             windowed_bigrams,
             desc=f"{bundle.speaker_id}:{utterance.sentence_id}",
@@ -182,6 +188,14 @@ def _observations_for_speaker(bundle: SpeakerBundle, config: ReproductionConfig)
                 f"{utterance.label} {windowed_bigram.bigram}#{windowed_bigram.window_index}"
             )
             estimate = estimate_vocal_tract(windowed_bigram, config)
+            if feature_output_dir is not None:
+                csv_rows.append(
+                    build_feature_row(
+                        utterance=utterance,
+                        windowed_bigram=windowed_bigram,
+                        estimate=estimate,
+                    )
+                )
             for tract_position, value in enumerate(estimate.tract_areas_cm2):
                 observations.append(
                     FeatureObservation(
@@ -193,6 +207,13 @@ def _observations_for_speaker(bundle: SpeakerBundle, config: ReproductionConfig)
                     )
                 )
         window_progress.close()
+        if feature_output_dir is not None:
+            write_utterance_feature_csv(
+                output_dir=feature_output_dir,
+                utterance=utterance,
+                config=config,
+                rows=csv_rows,
+            )
     utterance_progress.close()
     return observations
 
@@ -300,6 +321,7 @@ def build_detector(
     organic_root: Path,
     generated_root: Path,
     config: ReproductionConfig,
+    feature_output_dir: Path | None,
     seed: int = 1337,
     sample_size: int | None = None,
     feature_extraction_speakers: int | None = None,
@@ -320,7 +342,11 @@ def build_detector(
     feature_progress = tqdm(feature, desc="build speakers", unit="speaker")
     for bundle in feature_progress:
         feature_progress.set_postfix_str(bundle.speaker_id)
-        speaker_observations = _observations_for_speaker(bundle, config)
+        speaker_observations = _observations_for_speaker(
+            bundle=bundle,
+            config=config,
+            feature_output_dir=feature_output_dir,
+        )
         observations.extend(speaker_observations)
         feature_progress.set_postfix_str(
             f"{bundle.speaker_id} obs={len(speaker_observations)} total={len(observations)}"

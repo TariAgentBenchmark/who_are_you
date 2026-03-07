@@ -62,6 +62,22 @@ Build a detector model:
 uv run python main.py build-detector --model-path artifacts/detector_model.json
 ```
 
+`build-detector` will also write one CSV per utterance under `artifacts/feature_values/` by default.
+For example:
+
+```bash
+artifacts/feature_values/FAEM0/SA1__organic.csv
+artifacts/feature_values/FAEM0/SA1__deepfake.csv
+```
+
+Change the output directory with:
+
+```bash
+uv run python main.py build-detector \
+  --feature-output-dir artifacts/per_utterance_features \
+  --model-path artifacts/detector_model.json
+```
+
 Evaluate a saved detector model:
 
 ```bash
@@ -107,6 +123,7 @@ This remains expensive because the vocal-tract estimator dominates runtime.
 
 - The numeric core is `numba` on top of `numpy`.
 - The tract estimator follows the paper's concatenated-tube transfer-function setup and coordinate-search loop.
+- `build-detector` writes one CSV per utterance, with one row per bigram window and flattened reflection / tract-area columns.
 - The detector supports both:
   - `range` mode: compare against organic min/max ranges
   - `ideal` mode: compare against thresholded ideal features

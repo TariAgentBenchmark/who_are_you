@@ -15,6 +15,7 @@ from who_are_you.numba_backend import recover_cross_sectional_areas, tube_length
 DEFAULT_ORGANIC_ROOT = Path("datasets/TIMIT")
 DEFAULT_GENERATED_ROOT = Path("datasets/generated_TIMIT")
 DEFAULT_MODEL_PATH = Path("artifacts/detector_model.json")
+DEFAULT_FEATURE_OUTPUT_DIR = Path("artifacts/feature_values")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,6 +52,7 @@ def add_dataset_args(parser: argparse.ArgumentParser) -> None:
 
 def add_common_build_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
+    parser.add_argument("--feature-output-dir", type=Path, default=DEFAULT_FEATURE_OUTPUT_DIR)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--sample-size", type=int, default=None)
     parser.add_argument("--feature-speakers", type=int, default=None)
@@ -131,6 +133,7 @@ def run_build_detector(args: argparse.Namespace) -> int:
         organic_root=args.organic_root,
         generated_root=args.generated_root,
         config=config,
+        feature_output_dir=args.feature_output_dir,
         seed=args.seed,
         sample_size=args.sample_size,
         feature_extraction_speakers=args.feature_speakers,
@@ -139,6 +142,7 @@ def run_build_detector(args: argparse.Namespace) -> int:
     )
     model.save(args.model_path)
     payload = {
+        "feature_output_dir": str(args.feature_output_dir),
         "model_path": str(args.model_path),
         "sampled_speakers": len(model.sampled_speakers),
         "feature_speakers": len(model.feature_speakers),
