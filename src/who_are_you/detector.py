@@ -156,6 +156,58 @@ def split_speakers(
     return sampled, feature, evaluation
 
 
+def _extract_utterance_observations(
+    utterance,
+    config: ReproductionConfig,
+    feature_output_dir: Path | None = None,
+) -> list[FeatureObservation]:
+    observations: list[FeatureObservation] = []
+    windowed_bigrams = extract_windowed_bigrams(
+        utterance=utterance,
+        window_size=config.bigram_window_size,
+        overlap=config.bigram_window_overlap,
+    )
+    csv_rows: list[dict[str, str | int | float]] = []
+    window_progress = tqdm(
+        windowed_bigrams,
+        desc=f"{utterance.speaker_id}:{utterance.sentence_id}",
+        unit="window",
+        leave=False,
+    )
+    for windowed_bigram in window_progress:
+        window_progress.set_postfix_str(
+            f"{utterance.label} {windowed_bigram.bigram}#{windowed_bigram.window_index}"
+        )
+        estimate = estimate_vocal_tract(windowed_bigram, config)
+        if feature_output_dir is not None:
+            csv_rows.append(
+                build_feature_row(
+                    utterance=utterance,
+                    windowed_bigram=windowed_bigram,
+                    estimate=estimate,
+                )
+            )
+        for tract_position, value in enumerate(estimate.tract_areas_cm2):
+            observations.append(
+                FeatureObservation(
+                    key=(estimate.bigram, estimate.window_index, tract_position),
+                    label=utterance.label,
+                    value=float(value),
+                    speaker_id=utterance.speaker_id,
+                    sentence_id=utterance.sentence_id,
+                )
+            )
+    window_progress.close()
+    if feature_output_dir is not None:
+        write_utterance_feature_csv(
+            output_dir=feature_output_dir,
+            utterance=utterance,
+            config=config,
+            rows=csv_rows,
+        )
+    return observations
+
+
 def _observations_for_speaker(
     bundle: SpeakerBundle,
     config: ReproductionConfig,
@@ -171,49 +223,13 @@ def _observations_for_speaker(
     )
     for utterance in utterance_progress:
         utterance_progress.set_postfix_str(f"{utterance.label}:{utterance.sentence_id}")
-        windowed_bigrams = extract_windowed_bigrams(
-            utterance=utterance,
-            window_size=config.bigram_window_size,
-            overlap=config.bigram_window_overlap,
-        )
-        csv_rows: list[dict[str, str | int | float]] = []
-        window_progress = tqdm(
-            windowed_bigrams,
-            desc=f"{bundle.speaker_id}:{utterance.sentence_id}",
-            unit="window",
-            leave=False,
-        )
-        for windowed_bigram in window_progress:
-            window_progress.set_postfix_str(
-                f"{utterance.label} {windowed_bigram.bigram}#{windowed_bigram.window_index}"
-            )
-            estimate = estimate_vocal_tract(windowed_bigram, config)
-            if feature_output_dir is not None:
-                csv_rows.append(
-                    build_feature_row(
-                        utterance=utterance,
-                        windowed_bigram=windowed_bigram,
-                        estimate=estimate,
-                    )
-                )
-            for tract_position, value in enumerate(estimate.tract_areas_cm2):
-                observations.append(
-                    FeatureObservation(
-                        key=(estimate.bigram, estimate.window_index, tract_position),
-                        label=utterance.label,
-                        value=float(value),
-                        speaker_id=utterance.speaker_id,
-                        sentence_id=utterance.sentence_id,
-                    )
-                )
-        window_progress.close()
-        if feature_output_dir is not None:
-            write_utterance_feature_csv(
-                output_dir=feature_output_dir,
+        observations.extend(
+            _extract_utterance_observations(
                 utterance=utterance,
                 config=config,
-                rows=csv_rows,
+                feature_output_dir=feature_output_dir,
             )
+        )
     utterance_progress.close()
     return observations
 
@@ -406,59 +422,16 @@ def _predict_deepfake_from_ideal(
     return (deepfake_votes > matched / 2.0) if matched else False, deepfake_votes, matched
 
 
-def _evaluate_bundle(
-    bundle: SpeakerBundle,
+def _predict_utterance_deepfake(
+    observations: list[FeatureObservation],
     model: DetectorModel,
     mode: str,
-) -> tuple[bool, bool]:
-    config = model.config
-    speaker_utterances = load_speaker_utterances(bundle, max_sentence_pairs=config.max_sentence_pairs)
-    by_label = {"organic": [], "deepfake": []}
-    utterance_progress = tqdm(
-        speaker_utterances,
-        desc=f"{bundle.speaker_id} utterances",
-        unit="utt",
-        leave=False,
-    )
-    for utterance in utterance_progress:
-        utterance_progress.set_postfix_str(f"{utterance.label}:{utterance.sentence_id}")
-        windowed_bigrams = extract_windowed_bigrams(
-            utterance=utterance,
-            window_size=config.bigram_window_size,
-            overlap=config.bigram_window_overlap,
-        )
-        window_progress = tqdm(
-            windowed_bigrams,
-            desc=f"{bundle.speaker_id}:{utterance.sentence_id}",
-            unit="window",
-            leave=False,
-        )
-        for windowed_bigram in window_progress:
-            window_progress.set_postfix_str(
-                f"{utterance.label} {windowed_bigram.bigram}#{windowed_bigram.window_index}"
-            )
-            estimate = estimate_vocal_tract(windowed_bigram, config)
-            for tract_position, value in enumerate(estimate.tract_areas_cm2):
-                by_label[utterance.label].append(
-                    FeatureObservation(
-                        key=(estimate.bigram, estimate.window_index, tract_position),
-                        label=utterance.label,
-                        value=float(value),
-                        speaker_id=utterance.speaker_id,
-                        sentence_id=utterance.sentence_id,
-                    )
-                )
-        window_progress.close()
-    utterance_progress.close()
-
+) -> bool:
     if mode == "range":
-        organic_pred, _, _ = _predict_deepfake_from_ranges(by_label["organic"], model.organic_ranges)
-        deepfake_pred, _, _ = _predict_deepfake_from_ranges(by_label["deepfake"], model.organic_ranges)
+        predicted, _, _ = _predict_deepfake_from_ranges(observations, model.organic_ranges)
     else:
-        organic_pred, _, _ = _predict_deepfake_from_ideal(by_label["organic"], model.ideal_features)
-        deepfake_pred, _, _ = _predict_deepfake_from_ideal(by_label["deepfake"], model.ideal_features)
-
-    return organic_pred, deepfake_pred
+        predicted, _, _ = _predict_deepfake_from_ideal(observations, model.ideal_features)
+    return predicted
 
 
 def evaluate_detector(
@@ -472,22 +445,42 @@ def evaluate_detector(
         for bundle in discover_speakers(organic_root=organic_root, generated_root=generated_root)
     }
     tp = fp = tn = fn = 0
+    evaluated_audio_files = 0
     eval_progress = tqdm(model.evaluation_speakers, desc="eval speakers", unit="speaker")
     for speaker_id in eval_progress:
         bundle = bundles[speaker_id]
         eval_progress.set_postfix_str(speaker_id)
-        organic_pred, deepfake_pred = _evaluate_bundle(bundle, model, mode=mode)
-        if organic_pred:
-            fp += 1
-        else:
-            tn += 1
-        if deepfake_pred:
-            tp += 1
-        else:
-            fn += 1
-        eval_progress.set_postfix_str(
-            f"{speaker_id} org={'df' if organic_pred else 'org'} syn={'df' if deepfake_pred else 'org'}"
+        utterances = load_speaker_utterances(bundle, max_sentence_pairs=model.config.max_sentence_pairs)
+        utterance_progress = tqdm(
+            utterances,
+            desc=f"{bundle.speaker_id} utterances",
+            unit="utt",
+            leave=False,
         )
+        for utterance in utterance_progress:
+            utterance_progress.set_postfix_str(f"{utterance.label}:{utterance.sentence_id}")
+            observations = _extract_utterance_observations(
+                utterance=utterance,
+                config=model.config,
+            )
+            predicted_deepfake = _predict_utterance_deepfake(
+                observations=observations,
+                model=model,
+                mode=mode,
+            )
+            evaluated_audio_files += 1
+            if utterance.label == "organic":
+                if predicted_deepfake:
+                    fp += 1
+                else:
+                    tn += 1
+            else:
+                if predicted_deepfake:
+                    tp += 1
+                else:
+                    fn += 1
+        utterance_progress.close()
+        eval_progress.set_postfix_str(f"{speaker_id} files={evaluated_audio_files}")
     eval_progress.close()
 
     metrics = BinaryMetrics(
@@ -498,6 +491,8 @@ def evaluate_detector(
     )
     return {
         "mode": mode,
+        "evaluation_granularity": "audio_file",
+        "evaluated_audio_files": evaluated_audio_files,
         "num_ideal_features": len(model.ideal_features),
         "num_organic_ranges": len(model.organic_ranges),
         "metrics": metrics.to_dict(),

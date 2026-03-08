@@ -9,6 +9,7 @@ from who_are_you.bigrams import PhonemeSpan, build_in_word_bigrams
 from who_are_you.config import ReproductionConfig
 from who_are_you.corpus import discover_speakers
 from who_are_you.detector import DetectorModel, build_detector, evaluate_detector
+from who_are_you.ideal_coverage import analyze_ideal_feature_coverage
 from who_are_you.numba_backend import recover_cross_sectional_areas, tube_length_cm
 
 
@@ -41,6 +42,19 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
     evaluate.add_argument("--mode", choices=("ideal", "range"), default="ideal")
     evaluate.add_argument("--max-sentence-pairs", type=int, default=None)
+
+    coverage = subparsers.add_parser(
+        "analyze-ideal-coverage",
+        help="Measure how often the model's ideal-feature bigrams occur in the dataset.",
+    )
+    add_dataset_args(coverage)
+    coverage.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
+    coverage.add_argument(
+        "--speaker-split",
+        choices=("sampled", "feature", "evaluation", "all"),
+        default="sampled",
+    )
+    coverage.add_argument("--max-sentence-pairs", type=int, default=None)
 
     return parser
 
@@ -168,6 +182,19 @@ def run_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_analyze_ideal_coverage(args: argparse.Namespace) -> int:
+    model = DetectorModel.load(args.model_path)
+    payload = analyze_ideal_feature_coverage(
+        organic_root=args.organic_root,
+        generated_root=args.generated_root,
+        model=model,
+        speaker_split=args.speaker_split,
+        max_sentence_pairs=args.max_sentence_pairs,
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -184,6 +211,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_build_detector(args)
     if args.command == "evaluate":
         return run_evaluate(args)
+    if args.command == "analyze-ideal-coverage":
+        return run_analyze_ideal_coverage(args)
 
     parser.error(f"unknown command: {args.command}")
     return 2

@@ -85,6 +85,23 @@ uv run python main.py evaluate --model-path artifacts/detector_model.json --mode
 uv run python main.py evaluate --model-path artifacts/detector_model.json --mode range
 ```
 
+`evaluate` reports metrics at the audio-file level so the counts line up with the paper's evaluation framing rather than speaker-level voting.
+
+Measure the paper-style ideal-bigram occurrence coverage:
+
+```bash
+uv run python main.py analyze-ideal-coverage \
+  --model-path artifacts/paper_model.json
+```
+
+By default this analyzes the model's `sampled` speaker set. You can switch to `feature`, `evaluation`, or `all`:
+
+```bash
+uv run python main.py analyze-ideal-coverage \
+  --model-path artifacts/paper_model.json \
+  --speaker-split evaluation
+```
+
 ## Fast Smoke Test
 
 ```bash
@@ -124,6 +141,8 @@ This remains expensive because the vocal-tract estimator dominates runtime.
 - The numeric core is `numba` on top of `numpy`.
 - The tract estimator follows the paper's concatenated-tube transfer-function setup and coordinate-search loop.
 - `build-detector` writes one CSV per utterance, with one row per bigram window and flattened reflection / tract-area columns.
+- `evaluate` scores each utterance independently and reports audio-file-level metrics.
+- `analyze-ideal-coverage` reports both ideal-bigram occurrence coverage and unique-bigram coverage.
 - The detector supports both:
   - `range` mode: compare against organic min/max ranges
   - `ideal` mode: compare against thresholded ideal features
