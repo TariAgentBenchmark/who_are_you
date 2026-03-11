@@ -17,6 +17,7 @@ from who_are_you.windows import extract_windowed_bigrams
 
 
 FeatureKey = tuple[str, int, int]
+MERGED_WINDOW_INDEX = -1
 
 
 @dataclass(slots=True)
@@ -140,6 +141,16 @@ class DetectorModel:
         return cls.from_dict(json.loads(path.read_text()))
 
 
+def _feature_key(
+    bigram: str,
+    window_index: int,
+    tract_position: int,
+    use_window_index: bool,
+) -> FeatureKey:
+    effective_window_index = window_index if use_window_index else MERGED_WINDOW_INDEX
+    return (bigram, effective_window_index, tract_position)
+
+
 def split_speakers(
     bundles: list[SpeakerBundle],
     sample_size: int,
@@ -190,7 +201,12 @@ def _extract_utterance_observations(
         for tract_position, value in enumerate(estimate.tract_areas_cm2):
             observations.append(
                 FeatureObservation(
-                    key=(estimate.bigram, estimate.window_index, tract_position),
+                    key=_feature_key(
+                        bigram=estimate.bigram,
+                        window_index=estimate.window_index,
+                        tract_position=tract_position,
+                        use_window_index=config.use_window_index,
+                    ),
                     label=utterance.label,
                     value=float(value),
                     speaker_id=utterance.speaker_id,

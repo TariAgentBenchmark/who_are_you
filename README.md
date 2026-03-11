@@ -62,6 +62,14 @@ Build a detector model:
 uv run python main.py build-detector --model-path artifacts/detector_model.json
 ```
 
+To run an ablation that merges all windows of the same bigram together, add:
+
+```bash
+uv run python main.py build-detector \
+  --merge-window-index \
+  --model-path artifacts/detector_model_no_window.json
+```
+
 `build-detector` will also write one CSV per utterance under `artifacts/feature_values/` by default.
 For example:
 
@@ -141,6 +149,7 @@ This remains expensive because the vocal-tract estimator dominates runtime.
 - The numeric core is `numba` on top of `numpy`.
 - The tract estimator follows the paper's concatenated-tube transfer-function setup and coordinate-search loop.
 - `build-detector` writes one CSV per utterance, with one row per bigram window and flattened reflection / tract-area columns.
+- By default, detector features are keyed by `bigram + window_index + tract_position`; `--merge-window-index` removes `window_index` for ablation.
 - `evaluate` scores each utterance independently and reports audio-file-level metrics.
 - `analyze-ideal-coverage` reports both ideal-bigram occurrence coverage and unique-bigram coverage.
 - The detector supports both:

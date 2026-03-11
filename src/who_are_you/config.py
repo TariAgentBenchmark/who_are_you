@@ -23,6 +23,7 @@ class ReproductionConfig:
     coordinate_search_max_iterations: int = 200
     max_sentence_pairs: int | None = None
     speaker_seed: int = 1337
+    use_window_index: bool = True
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

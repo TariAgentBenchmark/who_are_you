@@ -76,6 +76,11 @@ def add_common_build_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--coordinate-search-step", type=float, default=None)
     parser.add_argument("--coordinate-search-max-iterations", type=int, default=None)
     parser.add_argument("--max-sentence-pairs", type=int, default=None)
+    parser.add_argument(
+        "--merge-window-index",
+        action="store_true",
+        help="Collapse all windows of the same bigram into one feature key for ablation.",
+    )
 
 
 def run_show_config() -> int:
@@ -143,6 +148,8 @@ def run_build_detector(args: argparse.Namespace) -> int:
         config.coordinate_search_max_iterations = args.coordinate_search_max_iterations
     if args.max_sentence_pairs is not None:
         config.max_sentence_pairs = args.max_sentence_pairs
+    if args.merge_window_index:
+        config.use_window_index = False
     model = build_detector(
         organic_root=args.organic_root,
         generated_root=args.generated_root,
@@ -163,6 +170,7 @@ def run_build_detector(args: argparse.Namespace) -> int:
         "evaluation_speakers": len(model.evaluation_speakers),
         "organic_ranges": len(model.organic_ranges),
         "ideal_features": len(model.ideal_features),
+        "use_window_index": model.config.use_window_index,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
